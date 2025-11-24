@@ -1,0 +1,22 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Data and artifacts
+data/
+experiments/
+logs/
+
+# Checkpoints
+*.ckpt
+*.pth
+*.pt
+
