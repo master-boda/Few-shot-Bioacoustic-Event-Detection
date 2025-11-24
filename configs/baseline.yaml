@@ -1,0 +1,45 @@
+# Paths
+data_root: "data/raw"
+train_metadata: "data/metadata/train.csv"
+val_metadata: "data/metadata/val.csv"
+work_dir: "experiments/baseline"
+
+# Dataset / episodes
+sample_rate: 32000
+clip_duration: 5.0  # seconds
+n_way: 5
+k_shot: 5
+query_per_class: 5
+episodes_per_epoch: 100
+val_episodes: 50
+
+# Features
+features:
+  n_mels: 64
+  n_fft: 1024
+  hop_length: 320
+  f_min: 50
+  f_max: 14000
+
+# Model
+model:
+  name: "prototypical"
+  hidden_size: 128
+  embedding_dim: 64
+
+# Optimization
+optimizer:
+  name: "adam"
+  lr: 0.001
+  weight_decay: 0.0
+scheduler:
+  name: "step"
+  step_size: 20
+  gamma: 0.5
+
+# Training
+epochs: 50
+episodes_per_epoch: 100
+val_episodes: 50
+num_workers: 4
+seed: 42
