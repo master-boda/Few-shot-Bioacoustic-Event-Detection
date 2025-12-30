@@ -192,18 +192,19 @@ def score_queries(
     if not prototypes or not queries:
         return {}
     q_feats = torch.stack([q.features for q in queries]).to(device)
-    q_emb = encoder(q_feats)  # (Q, D)
-    scores: Dict[str, np.ndarray] = {}
-    for cls, proto in prototypes.items():
-        p = proto.to(device)
-        if metric == "cosine":
-            qe = F.normalize(q_emb, dim=1)
-            pe = F.normalize(p, dim=0)
-            s = torch.matmul(qe, pe)
-            scores[cls] = s.cpu().numpy()
-        else:
-            d = torch.cdist(q_emb, p.unsqueeze(0)).squeeze(1)
-            scores[cls] = (-d).cpu().numpy()
+    with torch.no_grad():
+        q_emb = encoder(q_feats)  # (Q, D)
+        scores: Dict[str, np.ndarray] = {}
+        for cls, proto in prototypes.items():
+            p = proto.to(device)
+            if metric == "cosine":
+                qe = F.normalize(q_emb, dim=1)
+                pe = F.normalize(p, dim=0)
+                s = torch.matmul(qe, pe)
+                scores[cls] = s.detach().cpu().numpy()
+            else:
+                d = torch.cdist(q_emb, p.unsqueeze(0)).squeeze(1)
+                scores[cls] = (-d).detach().cpu().numpy()
     return scores
 
 
