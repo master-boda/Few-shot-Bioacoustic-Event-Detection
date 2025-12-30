@@ -15,8 +15,3 @@ data/
 experiments/
 logs/
 
-# Checkpoints
-*.ckpt
-*.pth
-*.pt
-
