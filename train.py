@@ -54,6 +54,8 @@ def main() -> None:
         f_min=int(feature_cfg.get("f_min", 50)),
         f_max=int(feature_cfg.get("f_max", 14000)) if feature_cfg.get("f_max") is not None else None,
         episodes=episodes_per_epoch,
+        use_spectral_contrast=bool(feature_cfg.get("use_spectral_contrast", False)),
+        spectral_contrast_bands=int(feature_cfg.get("spectral_contrast_bands", 6)),
     )
     val_dataset = BioacousticEpisodeDataset(
         metadata_csv=cfg["val_metadata"],
@@ -69,6 +71,8 @@ def main() -> None:
         f_min=int(feature_cfg.get("f_min", 50)),
         f_max=int(feature_cfg.get("f_max", 14000)) if feature_cfg.get("f_max") is not None else None,
         episodes=val_episodes,
+        use_spectral_contrast=bool(feature_cfg.get("use_spectral_contrast", False)),
+        spectral_contrast_bands=int(feature_cfg.get("spectral_contrast_bands", 6)),
     )
 
     train_loader = DataLoader(
@@ -86,7 +90,7 @@ def main() -> None:
 
     model_cfg = cfg.get("model", {})
     model = ProtoNet(
-        input_channels=1,
+        input_channels=getattr(train_dataset, "feature_channels", 1),
         hidden_size=int(model_cfg.get("hidden_size", 128)),
         embedding_dim=int(model_cfg.get("embedding_dim", 64)),
     ).to(device)

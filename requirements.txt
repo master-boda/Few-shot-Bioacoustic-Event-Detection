@@ -1,5 +1,7 @@
 torch
 torchaudio
+torchcodec
+librosa
 numpy
 scipy
 pyyaml

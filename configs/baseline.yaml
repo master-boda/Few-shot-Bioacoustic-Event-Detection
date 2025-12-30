@@ -7,11 +7,13 @@ work_dir: "experiments/baseline"
 # Dataset / episodes
 sample_rate: 32000
 clip_duration: 5.0  # seconds
-n_way: 5
-k_shot: 5
-query_per_class: 5
+n_way: 3        # reduced to match available classes
+k_shot: 1       # min clips per class in train: BV/HT (5), MT (2), WMW (161)
+query_per_class: 1
 episodes_per_epoch: 100
 val_episodes: 50
+window_seconds: 1.0
+hop_seconds: 0.25
 
 # Features
 features:
@@ -20,6 +22,14 @@ features:
   hop_length: 320
   f_min: 50
   f_max: 14000
+  use_spectral_contrast: true
+  spectral_contrast_bands: 6
+
+# Post-processing (few-shot detection)
+postprocess:
+  threshold: 0.0           # distance/similarity threshold
+  median_filter: 3         # frames (odd int), 0 to disable
+  min_duration: 0.2        # seconds, drop shorter events
 
 # Model
 model:
@@ -41,5 +51,5 @@ scheduler:
 epochs: 50
 episodes_per_epoch: 100
 val_episodes: 50
-num_workers: 4
+num_workers: 20
 seed: 42
