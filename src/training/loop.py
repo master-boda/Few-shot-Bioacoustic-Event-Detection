@@ -20,10 +20,10 @@ def train_one_epoch(
     criterion = nn.CrossEntropyLoss()
     for batch in loader:
         optimizer.zero_grad()
-        support = batch["support"].to(device)
-        query = batch["query"].to(device)
-        support_labels = batch["support_labels"].to(device)
-        query_labels = batch["query_labels"].to(device)
+        support = batch["support"].squeeze(0).to(device)  # (N*K, 1, n_mels, time)
+        query = batch["query"].squeeze(0).to(device)      # (N*Q, 1, n_mels, time)
+        support_labels = batch["support_labels"].squeeze(0).to(device)
+        query_labels = batch["query_labels"].squeeze(0).to(device)
 
         support_embeddings = model(support)
         query_embeddings = model(query)
@@ -49,10 +49,10 @@ def validate(
     total = 0
     with torch.no_grad():
         for batch in loader:
-            query = batch["query"].to(device)
-            support = batch["support"].to(device)
-            support_labels = batch["support_labels"].to(device)
-            query_labels = batch["query_labels"].to(device)
+            query = batch["query"].squeeze(0).to(device)
+            support = batch["support"].squeeze(0).to(device)
+            support_labels = batch["support_labels"].squeeze(0).to(device)
+            query_labels = batch["query_labels"].squeeze(0).to(device)
             prototypes = model.compute_prototypes(model(support), support_labels, n_way)
             logits = -model.pairwise_distances(model(query), prototypes)
             preds = logits.argmax(dim=1)
@@ -60,4 +60,3 @@ def validate(
             total += query_labels.numel()
     accuracy = correct / total if total else 0.0
     return {"accuracy": accuracy}
-
