@@ -92,22 +92,32 @@ def main() -> None:
 
     # 3) Official eval
     eval_script = Path("src/eval/dcase/evaluation_metrics/evaluation.py")
-    run(
-        [
-            py,
-            str(eval_script),
-            "-pred_file",
-            args.preds,
-            "-ref_files_path",
-            args.val_annotations,
-            "-team_name",
-            args.team_name,
-            "-dataset",
-            "VAL",
-            "-savepath",
-            args.savepath,
-        ]
-    )
+    # if the script isn't in CWD (e.g., running from a different working dir), try absolute path from repo root
+    candidates = [eval_script, Path(__file__).resolve().parent.parent / "src/eval/dcase/evaluation_metrics/evaluation.py"]
+    script_path = None
+    for c in candidates:
+        if c.exists():
+            script_path = c
+            break
+    if script_path is None:
+        print(f"[pipeline] WARNING: evaluation script not found at {candidates}")
+    else:
+        run(
+            [
+                py,
+                str(script_path),
+                "-pred_file",
+                args.preds,
+                "-ref_files_path",
+                args.val_annotations,
+                "-team_name",
+                args.team_name,
+                "-dataset",
+                "VAL",
+                "-savepath",
+                args.savepath,
+            ]
+        )
 
 
 if __name__ == "__main__":
