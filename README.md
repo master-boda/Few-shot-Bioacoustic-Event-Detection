@@ -59,6 +59,15 @@ python evaluate.py --pred_csv predictions.csv --ref_csv ground_truth.csv --iou 0
 ```
 - `scripts/sweep_threshold.py` can sweep thresholds if you save multiple prediction CSVs (using `{thr}` placeholder in the filename).
 - `scripts/run_pipeline.py` runs train -> detect -> official eval in one go (verbose).
+- Official DCASE evaluator is vendored at `src/eval/dcase/evaluation_metrics/evaluation.py`. Run from repo root:
+```
+python src/eval/dcase/evaluation_metrics/evaluation.py \
+  -pred_file=preds.csv \
+  -ref_files_path=path/to/Validation_Set \
+  -team_name=TESTteam \
+  -dataset=VAL \
+  -savepath=./
+```
 
 ## Notebooks
 - `notebooks/explore_dataset.ipynb` provides a simple dataset inspection (event counts per file and example annotation rows).
