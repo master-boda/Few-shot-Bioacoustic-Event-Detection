@@ -27,15 +27,26 @@ features:
 
 # Post-processing (few-shot detection)
 postprocess:
-  threshold: 0.0           # distance/similarity threshold
+  threshold: 0.0           # used when threshold_mode=global
+  threshold_mode: "percentile"
+  percentile: 99.5
+  zscore: 2.5
   median_filter: 3         # frames (odd int), 0 to disable
-  min_duration: 0.2        # seconds, drop shorter events
+  min_duration: 0.2        # seconds, drop shorter events (merge mode)
+  merge_gap: 0.0           # seconds, merge gaps shorter than this
+  event_mode: "peak"       # peak or merge
+  peak_distance: 0.25      # seconds between peaks
+  event_duration: 0.0      # 0 uses mean support duration
+  score_mode: "pos_minus_bg"
+  bg_percentile: 10.0
 
 # Model
 model:
   name: "prototypical"
-  hidden_size: 128
-  embedding_dim: 64
+  hidden_size: 64
+  embedding_dim: 128
+  num_blocks: 3
+  channel_mult: 2
 
 # Optimization
 optimizer:
@@ -53,3 +64,10 @@ episodes_per_epoch: 100
 val_episodes: 50
 num_workers: 20
 seed: 42
+
+# Per-file training (train_events.py)
+train_events:
+  pos_iou: 0.3
+  neg_iou: 0.05
+  proto_weight: 1.0
+  bce_weight: 1.0

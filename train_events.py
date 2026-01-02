@@ -19,12 +19,27 @@ from src.models.protonet import ProtoNet
 from src.utils.config import load_config
 
 
-def label_queries(meta, pos_events: List[Event], iou_thr: float = 0.1) -> torch.Tensor:
+def label_queries(
+    meta,
+    pos_events: List[Event],
+    pos_iou: float = 0.3,
+    neg_iou: float = 0.05,
+) -> tuple[torch.Tensor, torch.Tensor]:
     labels = []
+    keep = []
     for info in meta:
         window = Event(start=info.start, end=info.end)
-        labels.append(1 if max_iou(window, pos_events) >= iou_thr else 0)
-    return torch.tensor(labels, dtype=torch.long)
+        score = max_iou(window, pos_events)
+        if score >= pos_iou:
+            labels.append(1)
+            keep.append(True)
+        elif score <= neg_iou:
+            labels.append(0)
+            keep.append(True)
+        else:
+            labels.append(0)
+            keep.append(False)
+    return torch.tensor(labels, dtype=torch.long), torch.tensor(keep, dtype=torch.bool)
 
 
 def max_iou(win: Event, events: List[Event]) -> float:
@@ -45,6 +60,10 @@ def main():
     parser.add_argument("--checkpoint_in", type=str, default=None, help="Path to load model weights")
     parser.add_argument("--save_best", action="store_true", help="Save only when loss improves")
     parser.add_argument("--chunk_size", type=int, default=1, help="Chunk size for query windows to reduce memory")
+    parser.add_argument("--pos_iou", type=float, default=None, help="IoU threshold for positives")
+    parser.add_argument("--neg_iou", type=float, default=None, help="IoU threshold for negatives")
+    parser.add_argument("--proto_weight", type=float, default=None, help="Weight for proto loss")
+    parser.add_argument("--bce_weight", type=float, default=None, help="Weight for BCE loss")
     parser.add_argument("--verbose", action="store_true", help="Verbose logging")
     args = parser.parse_args()
 
@@ -73,14 +92,23 @@ def main():
         input_channels=getattr(dataset, "feature_channels", 1),
         hidden_size=int(model_cfg.get("hidden_size", 128)),
         embedding_dim=int(model_cfg.get("embedding_dim", 64)),
+        num_blocks=int(model_cfg.get("num_blocks", 1)),
+        channel_mult=int(model_cfg.get("channel_mult", 2)),
     ).to(args.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.get("optimizer", {}).get("lr", 1e-3)))
     if args.checkpoint_in:
         state = torch.load(args.checkpoint_in, map_location=args.device)
-        model.load_state_dict(state["model"])
+        model.load_state_dict(state["model"], strict=False)
         optimizer.load_state_dict(state.get("optimizer", optimizer.state_dict()))
     criterion = torch.nn.CrossEntropyLoss()
+    bce_criterion = torch.nn.BCEWithLogitsLoss()
     best_loss = float("inf")
+
+    train_cfg = cfg.get("train_events", {})
+    pos_iou = float(args.pos_iou if args.pos_iou is not None else train_cfg.get("pos_iou", 0.3))
+    neg_iou = float(args.neg_iou if args.neg_iou is not None else train_cfg.get("neg_iou", 0.05))
+    proto_weight = float(args.proto_weight if args.proto_weight is not None else train_cfg.get("proto_weight", 1.0))
+    bce_weight = float(args.bce_weight if args.bce_weight is not None else train_cfg.get("bce_weight", 1.0))
 
     if args.verbose:
         print(f"[train_events] files: {len(dataset)}")
@@ -97,26 +125,49 @@ def main():
             pos_events = batch["pos_after_support"]
             if isinstance(pos_events, list) and len(pos_events) == 0:
                 continue
-            labels = label_queries(meta, pos_events if isinstance(pos_events, list) else [pos_events]).to(args.device)
+            labels, keep = label_queries(
+                meta,
+                pos_events if isinstance(pos_events, list) else [pos_events],
+                pos_iou=pos_iou,
+                neg_iou=neg_iou,
+            )
+            if keep.sum().item() == 0:
+                continue
+            labels = labels.to(args.device)
+            keep = keep.to(args.device)
 
             optimizer.zero_grad()
             num_chunks = max(1, (query.shape[0] + args.chunk_size - 1) // args.chunk_size)
             chunk_losses = 0.0
+            proto = model(support).mean(dim=0, keepdim=True)
             for i in range(0, query.shape[0], args.chunk_size):
                 q_chunk = query[i : i + args.chunk_size]
                 lbl_chunk = labels[i : i + args.chunk_size]
-                proto = model(support).mean(dim=0, keepdim=True)
+                keep_chunk = keep[i : i + args.chunk_size]
+                if keep_chunk.sum().item() == 0:
+                    continue
                 q_emb = model(q_chunk)
                 dists = model.pairwise_distances(q_emb, proto).squeeze(1)
                 # two-class logits: background=0, foreground=-dist
                 logits = torch.stack([torch.zeros_like(dists), -dists], dim=1)
-                chunk_loss = criterion(logits, lbl_chunk) / num_chunks
+                proto_loss = criterion(logits[keep_chunk], lbl_chunk[keep_chunk])
+                bce_loss = 0.0
+                if bce_weight > 0:
+                    bce_logits = model.classify(q_emb).squeeze(1)
+                    bce_targets = lbl_chunk.float()
+                    bce_loss = bce_criterion(bce_logits[keep_chunk], bce_targets[keep_chunk])
+                chunk_loss = (proto_weight * proto_loss + bce_weight * bce_loss) / num_chunks
                 chunk_loss.backward()
                 chunk_losses += chunk_loss.item()
             optimizer.step()
             total_loss += chunk_losses
             if args.verbose:
-                print(f"[train_events] epoch {epoch} batch {idx+1}/{len(loader)} loss={chunk_losses:.4f} file={batch.get('ann_path')}")
+                kept = keep.sum().item()
+                print(
+                    f"[train_events] epoch {epoch} batch {idx+1}/{len(loader)} "
+                    f"loss={chunk_losses:.4f} kept={kept} pos_iou={pos_iou} neg_iou={neg_iou} "
+                    f"proto_w={proto_weight} bce_w={bce_weight} file={batch.get('ann_path')}"
+                )
         print(f"Epoch {epoch}/{args.epochs} loss={total_loss/max(1,len(loader)):.4f}")
         if args.checkpoint_out:
             if args.save_best and total_loss >= best_loss:

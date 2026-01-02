@@ -100,14 +100,17 @@ def main():
     device = torch.device(args.device)
 
     feature_cfg = cfg.get("features", {})
+    model_cfg = cfg.get("model", {})
     encoder = ProtoNet(
         input_channels=2 if feature_cfg.get("use_spectral_contrast", False) else 1,
-        hidden_size=int(cfg.get("model", {}).get("hidden_size", 128)),
-        embedding_dim=int(cfg.get("model", {}).get("embedding_dim", 64)),
+        hidden_size=int(model_cfg.get("hidden_size", 128)),
+        embedding_dim=int(model_cfg.get("embedding_dim", 64)),
+        num_blocks=int(model_cfg.get("num_blocks", 1)),
+        channel_mult=int(model_cfg.get("channel_mult", 2)),
     ).to(device)
     if args.checkpoint:
         state = torch.load(args.checkpoint, map_location=device)
-        encoder.load_state_dict(state["model"])
+        encoder.load_state_dict(state["model"], strict=False)
     encoder.eval()
 
     ann_paths = sorted(Path(args.annotations_root).rglob("*.csv"))
