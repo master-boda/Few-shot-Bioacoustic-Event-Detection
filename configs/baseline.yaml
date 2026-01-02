@@ -71,3 +71,4 @@ train_events:
   neg_iou: 0.05
   proto_weight: 1.0
   bce_weight: 1.0
+  class_strategy: "max_pos"

@@ -69,6 +69,7 @@ def main():
 
     cfg = load_config(args.config)
     feature_cfg = cfg.get("features", {})
+    train_cfg = cfg.get("train_events", {})
     ann_paths = collect_annotations(args.annotations_root)
     dataset = FewShotEventDataset(
         data_root=cfg["data_root"],
@@ -84,6 +85,7 @@ def main():
         hop_seconds=float(cfg.get("hop_seconds", 0.25)),
         use_spectral_contrast=bool(feature_cfg.get("use_spectral_contrast", False)),
         spectral_contrast_bands=int(feature_cfg.get("spectral_contrast_bands", 6)),
+        class_strategy=str(train_cfg.get("class_strategy", "max_pos")),
     )
     loader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=lambda x: x[0])
 
@@ -104,7 +106,6 @@ def main():
     bce_criterion = torch.nn.BCEWithLogitsLoss()
     best_loss = float("inf")
 
-    train_cfg = cfg.get("train_events", {})
     pos_iou = float(args.pos_iou if args.pos_iou is not None else train_cfg.get("pos_iou", 0.3))
     neg_iou = float(args.neg_iou if args.neg_iou is not None else train_cfg.get("neg_iou", 0.05))
     proto_weight = float(args.proto_weight if args.proto_weight is not None else train_cfg.get("proto_weight", 1.0))
@@ -139,13 +140,13 @@ def main():
             optimizer.zero_grad()
             num_chunks = max(1, (query.shape[0] + args.chunk_size - 1) // args.chunk_size)
             chunk_losses = 0.0
-            proto = model(support).mean(dim=0, keepdim=True)
             for i in range(0, query.shape[0], args.chunk_size):
                 q_chunk = query[i : i + args.chunk_size]
                 lbl_chunk = labels[i : i + args.chunk_size]
                 keep_chunk = keep[i : i + args.chunk_size]
                 if keep_chunk.sum().item() == 0:
                     continue
+                proto = model(support).mean(dim=0, keepdim=True)
                 q_emb = model(q_chunk)
                 dists = model.pairwise_distances(q_emb, proto).squeeze(1)
                 # two-class logits: background=0, foreground=-dist
