@@ -93,6 +93,9 @@ def main() -> None:
         input_channels=getattr(train_dataset, "feature_channels", 1),
         hidden_size=int(model_cfg.get("hidden_size", 128)),
         embedding_dim=int(model_cfg.get("embedding_dim", 64)),
+        num_blocks=int(model_cfg.get("num_blocks", 1)),
+        channel_mult=int(model_cfg.get("channel_mult", 2)),
+        encoder_type=str(model_cfg.get("encoder", "simple_cnn")),
     ).to(device)
 
     opt_cfg = cfg.get("optimizer", {})
