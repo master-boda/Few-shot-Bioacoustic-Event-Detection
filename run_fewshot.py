@@ -41,6 +41,23 @@ def process_file(
     if verbose:
         print(f"[fewshot] {ann_path.name}: support classes={list(support.keys())}, ignore_before={ignore_before:.2f}")
 
+    window_seconds = float(cfg.get("window_seconds", 1.0))
+    hop_seconds = float(cfg.get("hop_seconds", 0.25))
+    if cfg.get("adaptive_window", False):
+        durations = [ev.end - ev.start for evs in support.values() for ev in evs]
+        max_dur = max(durations, default=0.0)
+        if max_dur > 0:
+            window_seconds = max_dur
+        min_sec = cfg.get("adaptive_min_seconds")
+        max_sec = cfg.get("adaptive_max_seconds")
+        if min_sec is not None:
+            window_seconds = max(window_seconds, float(min_sec))
+        if max_sec is not None:
+            window_seconds = min(window_seconds, float(max_sec))
+        ratio = cfg.get("adaptive_hop_ratio", 0.5)
+        if ratio is not None:
+            hop_seconds = max(window_seconds * float(ratio), 1e-4)
+
     melspec = torchaudio.transforms.MelSpectrogram(
         sample_rate=sample_rate,
         n_fft=int(feature_cfg.get("n_fft", 1024)),
@@ -56,12 +73,13 @@ def process_file(
         sample_rate,
         support,
         ignore_before,
-        window_seconds=float(cfg.get("window_seconds", 1.0)),
-        hop_seconds=float(cfg.get("hop_seconds", 0.25)),
+        window_seconds=window_seconds,
+        hop_seconds=hop_seconds,
         melspec=melspec,
         to_db=to_db,
         use_spectral_contrast=bool(feature_cfg.get("use_spectral_contrast", False)),
         spectral_contrast_bands=int(feature_cfg.get("spectral_contrast_bands", 6)),
+        normalize=str(feature_cfg.get("normalize", "none")),
     )
 
     prototypes = compute_prototypes(encoder, support_patches, device)
@@ -107,6 +125,7 @@ def main():
         embedding_dim=int(model_cfg.get("embedding_dim", 64)),
         num_blocks=int(model_cfg.get("num_blocks", 1)),
         channel_mult=int(model_cfg.get("channel_mult", 2)),
+        encoder_type=str(model_cfg.get("encoder", "simple_cnn")),
     ).to(device)
     if args.checkpoint:
         state = torch.load(args.checkpoint, map_location=device)

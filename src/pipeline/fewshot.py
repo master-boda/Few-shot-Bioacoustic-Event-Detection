@@ -92,6 +92,7 @@ def extract_features(
     to_db,
     use_spectral_contrast: bool,
     spectral_contrast_bands: int,
+    normalize: str,
 ) -> Tensor:
     start = int(start_s * sample_rate)
     end = int(end_s * sample_rate)
@@ -105,7 +106,7 @@ def extract_features(
     log_mel = to_db(mel).squeeze(0)  # (n_mels, time)
     log_mel = log_mel.unsqueeze(0)  # channel dim
     if not use_spectral_contrast:
-        return log_mel
+        return _normalize_features(log_mel, normalize)
     np_wave = segment.squeeze(0).numpy()
     sc = librosa.feature.spectral_contrast(
         y=np_wave,
@@ -116,7 +117,16 @@ def extract_features(
     )
     sc_t = torch.tensor(sc, dtype=torch.float32).unsqueeze(0).unsqueeze(1)  # (1,1,bands+1,frames)
     sc_resized = F.interpolate(sc_t, size=log_mel.shape[-2:], mode="bilinear", align_corners=False).squeeze(1)
-    return torch.cat([log_mel, sc_resized], dim=0)
+    feats = torch.cat([log_mel, sc_resized], dim=0)
+    return _normalize_features(feats, normalize)
+
+
+def _normalize_features(feats: Tensor, normalize: str) -> Tensor:
+    if normalize != "minmax":
+        return feats
+    feat_min = feats.amin(dim=(1, 2), keepdim=True)
+    feat_max = feats.amax(dim=(1, 2), keepdim=True)
+    return (feats - feat_min) / (feat_max - feat_min + 1e-6)
 
 
 def build_patches(
@@ -130,6 +140,7 @@ def build_patches(
     to_db,
     use_spectral_contrast: bool,
     spectral_contrast_bands: int,
+    normalize: str,
 ) -> Tuple[Dict[str, List[Patch]], List[Patch]]:
     window_samples = int(window_seconds * sample_rate)
     support_patches: Dict[str, List[Patch]] = {}
@@ -146,6 +157,7 @@ def build_patches(
                 to_db,
                 use_spectral_contrast,
                 spectral_contrast_bands,
+                normalize,
             )
             support_patches[cls].append(Patch(start=ev.start, end=ev.end, features=feat))
 
@@ -165,6 +177,7 @@ def build_patches(
             to_db,
             use_spectral_contrast,
             spectral_contrast_bands,
+            normalize,
         )
         query_patches.append(Patch(start=start, end=end, features=feat))
         t += hop_seconds
