@@ -1,1 +1,9 @@
-data.zip
+data/
+Features/
+Model/
+outputs/
+__pycache__/
+*.h5
+*.pth
+*.pt
+*.zip
