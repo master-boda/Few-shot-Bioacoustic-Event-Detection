@@ -247,7 +247,8 @@ def feature_transform(conf, mode: str = 'train'):
 
             # negative features from full audio
             curr_t0 = 0
-            last_frame = pcen.shape[-1]
+            # pcen is time x mels here
+            last_frame = pcen.shape[0]
             while curr_t0 + seg_len_eval <= last_frame:
                 spec = pcen[curr_t0:curr_t0 + seg_len_eval].T
                 hf['feat_neg'].resize((hf['feat_neg'].shape[0] + 1), axis=0)
