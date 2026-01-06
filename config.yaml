@@ -24,6 +24,7 @@ features:
   n_fft: 1024
   n_mels: 128
   hop_mel: 256
+  train_limit: 0
   
 train:
   num_classes: 15

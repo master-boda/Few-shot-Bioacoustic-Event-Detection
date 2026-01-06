@@ -117,6 +117,7 @@ The description was adapted from https://github.com/xdurch0/DCASE2021-Task5
 | n_fft | Window size for STFT.
 | n_mels | Number of mel frequency bins to use.
 | hop_mel | Hop size for the STFT extraction.
+| train_limit | If > 0, cap the number of training csv files (useful for quick runs).
 
 
 ### train
