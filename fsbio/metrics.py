@@ -98,12 +98,13 @@ def evaluate_prototypes(conf=None, hdf_eval=None, device=None, strt_index_query=
     # compute positive prototype
     emb_dim = 512
     pos_set_feat = torch.zeros(0, emb_dim).cpu()
-    for batch in tqdm(torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_pos, y_pos))):
-        x, _ = batch
-        x = x.to(device)
-        feat = encoder(x).cpu()
-        feat_mean = feat.mean(dim=0).unsqueeze(0)
-        pos_set_feat = torch.cat((pos_set_feat, feat_mean), dim=0)
+    with torch.no_grad():
+        for batch in tqdm(torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_pos, y_pos))):
+            x, _ = batch
+            x = x.to(device)
+            feat = encoder(x).cpu()
+            feat_mean = feat.mean(dim=0).unsqueeze(0)
+            pos_set_feat = torch.cat((pos_set_feat, feat_mean), dim=0)
     proto_pos = pos_set_feat.mean(dim=0)
 
     prob_comb = []
@@ -111,15 +112,28 @@ def evaluate_prototypes(conf=None, hdf_eval=None, device=None, strt_index_query=
         prob_pos_iter = []
         neg_indices = torch.randperm(len(x_neg))[:conf.eval.samples_neg]
         x_neg_iter = x_neg[neg_indices]
-        x_neg_iter = x_neg_iter.to(device)
-        feat_neg = encoder(x_neg_iter).detach().cpu()
-        proto_neg = feat_neg.mean(dim=0).to(device)
+        neg_loader = torch.utils.data.DataLoader(
+            dataset=torch.utils.data.TensorDataset(x_neg_iter, y_neg[: len(x_neg_iter)]),
+            batch_size=conf.eval.negative_set_batch_size,
+            shuffle=False,
+        )
+        neg_sum = torch.zeros(emb_dim).cpu()
+        neg_count = 0
+        with torch.no_grad():
+            for batch in neg_loader:
+                x_n, _ = batch
+                x_n = x_n.to(device)
+                feat_neg = encoder(x_n).cpu()
+                neg_sum += feat_neg.sum(dim=0)
+                neg_count += feat_neg.shape[0]
+        proto_neg = (neg_sum / max(1, neg_count)).to(device)
 
-        for batch in tqdm(query_loader):
-            x_q, _ = batch
-            x_q = x_q.to(device)
-            feat_q = encoder(x_q).detach().cpu()
-            prob_pos_iter.extend(_probability(proto_pos, proto_neg.cpu(), feat_q))
+        with torch.no_grad():
+            for batch in tqdm(query_loader):
+                x_q, _ = batch
+                x_q = x_q.to(device)
+                feat_q = encoder(x_q).cpu()
+                prob_pos_iter.extend(_probability(proto_pos, proto_neg.cpu(), feat_q))
 
         prob_comb.append(prob_pos_iter)
         print("Iteration number {}".format(i))
