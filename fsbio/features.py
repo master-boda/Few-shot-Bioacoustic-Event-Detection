@@ -140,7 +140,7 @@ def feature_transform(conf, mode: str = 'train'):
             for path_dir, _, _ in os.walk(meta_path)
             for file in glob(os.path.join(path_dir, extension))
         ]
-        all_csv_files = all_csv_files[:100]
+        # use the full training set
         hdf_tr = os.path.join(conf.path.feat_train, 'Mel_train.h5')
         hf = h5py.File(hdf_tr, 'w')
         hf.create_dataset(
