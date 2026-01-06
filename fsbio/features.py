@@ -198,8 +198,14 @@ def feature_transform(conf, mode: str = 'train'):
             label_list = df_eval['Q'].values
 
             index_sup = np.where(label_list == 'POS')[0][:conf.train.n_shot]
+            if len(index_sup) == 0:
+                hf.close()
+                continue
             max_len = max(end_time[index_sup] - start_time[index_sup])
             seg_len_eval = int(round(max_len * fps))
+            if seg_len_eval <= 0:
+                hf.close()
+                continue
             hop_seg_eval = int(round(seg_len_eval / 2))
 
             print("Segment length for file is {}".format(seg_len_eval))
