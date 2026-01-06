@@ -217,6 +217,16 @@ def feature_transform(conf, mode: str = 'train'):
             hf.create_dataset('feat_neg', shape=(0, conf.features.n_mels, seg_len_eval), maxshape=(None, conf.features.n_mels, seg_len_eval))
             hf.create_dataset('feat_query', shape=(0, conf.features.n_mels, seg_len_eval), maxshape=(None, conf.features.n_mels, seg_len_eval))
 
+            def _tile_to_len(arr: np.ndarray, target_len: int) -> np.ndarray | None:
+                # pad short segments by tiling to target length
+                if arr.shape[-1] == 0:
+                    return None
+                if arr.shape[-1] < target_len:
+                    repeat_num = int(target_len / arr.shape[-1]) + 1
+                    arr = np.tile(arr, (1, repeat_num))
+                    arr = arr[:, :target_len]
+                return arr
+
             # support features
             for index in range(len(index_sup)):
                 start_idx = int(round(start_time[index_sup[index]] * fps))
@@ -228,9 +238,12 @@ def feature_transform(conf, mode: str = 'train'):
                         hf['feat_pos'].resize((hf['feat_pos'].shape[0] + 1), axis=0)
                         hf['feat_pos'][-1] = spec
                 else:
-                    spec = pcen[end_idx - seg_len_eval:end_idx].T
-                    hf['feat_pos'].resize((hf['feat_pos'].shape[0] + 1), axis=0)
-                    hf['feat_pos'][-1] = spec
+                    if end_idx - start_idx > 0:
+                        spec = pcen[start_idx:end_idx].T
+                        spec = _tile_to_len(spec, seg_len_eval)
+                        if spec is not None:
+                            hf['feat_pos'].resize((hf['feat_pos'].shape[0] + 1), axis=0)
+                            hf['feat_pos'][-1] = spec
 
             # negative features from full audio
             curr_t0 = 0
