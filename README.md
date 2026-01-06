@@ -14,19 +14,21 @@ In evaluation stage, each audio file is split in the same manner as done during 
 
 We randomly sample from the negative class to calculate the negative prototype. Each query sample is assigned a probability based on the distance from the positive and negative prototype. Onset and offset prediction is made based on thresholding the probabilities across the query set. Since samples are selected randomly for calculating the negative prototype, the prediction process for each file is repeated 5 times to negate some amount of randomness. The final prediction probability for each query frame is the average of predictions across all iterations. 
 
-# Files
+# files
 
-1) Features_extract.py: For extracting the features
+1) `fsbio/features.py`: feature extraction + patching logic
 
-2) Datagenerator.py: For creating training, validation and evaluation set
+2) `fsbio/data.py`: dataset balancing and train/val splits
 
-3) batch_sample.py: Batch sampler
+3) `fsbio/sampler.py`: episodic batch sampler
 
-4) Model.py: Prototypical network
+4) `fsbio/model.py`: prototypical net + resnet encoder
 
-5) util.py: This file contains the prototypical loss function and prototype evaluation function. The evaluation function is used for calculating negative and positive prototypes during evaluation stage, post which onset offset predictions are made. 
+5) `fsbio/metrics.py`: proto loss + evaluation routine
 
-6) config.yaml: Consists of all the control parameters from feature extraction and training. 
+6) `main.py`: hydra entrypoint that runs feature, train, eval stages
+
+7) `config.yaml`: all control params for feature extraction and training
 
 # Running the code
 
@@ -67,7 +69,7 @@ python main.py set.eval=true
 + Segment length refers to the equal length patches extracted from the time frequency representation. This is kept fixed for training set, however for evaluation
   set, the segment legnths are selected based on the max length from 5 shots. This was done because the events are of varying lengths across different audio files 
   and using a fixed length segments does not work well. 
-+ We have used a 9 layer Resnet model instead of the classi prototypical networks model ( 4 convolution layers). 
++ We use the 9 layer resnet encoder from the baseline and do not keep the 4 layer protonet option. 
 
 # Post Processing
 
