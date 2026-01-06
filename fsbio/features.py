@@ -206,6 +206,8 @@ def feature_transform(conf, mode: str = 'train'):
                 continue
             max_len = max(end_time[index_sup] - start_time[index_sup])
             seg_len_eval = int(round(max_len * fps))
+            # keep eval patches at least as long as training patches to avoid pooling collapse
+            seg_len_eval = max(seg_len_eval, seg_len)
             if seg_len_eval <= 0:
                 hf.close()
                 continue
