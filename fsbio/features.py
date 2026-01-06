@@ -217,12 +217,12 @@ def feature_transform(conf, mode: str = 'train'):
                 end_idx = int(round(end_time[index_sup[index]] * fps))
                 if end_idx - start_idx > seg_len_eval:
                     while start_idx + seg_len_eval <= end_idx:
-                        spec = pcen[:, start_idx:start_idx + seg_len_eval]
+                        spec = pcen[start_idx:start_idx + seg_len_eval].T
                         start_idx += hop_seg_eval
                         hf['feat_pos'].resize((hf['feat_pos'].shape[0] + 1), axis=0)
                         hf['feat_pos'][-1] = spec
                 else:
-                    spec = pcen[:, end_idx - seg_len_eval:end_idx]
+                    spec = pcen[end_idx - seg_len_eval:end_idx].T
                     hf['feat_pos'].resize((hf['feat_pos'].shape[0] + 1), axis=0)
                     hf['feat_pos'][-1] = spec
 
@@ -230,7 +230,7 @@ def feature_transform(conf, mode: str = 'train'):
             curr_t0 = 0
             last_frame = pcen.shape[-1]
             while curr_t0 + seg_len_eval <= last_frame:
-                spec = pcen[:, curr_t0:curr_t0 + seg_len_eval]
+                spec = pcen[curr_t0:curr_t0 + seg_len_eval].T
                 hf['feat_neg'].resize((hf['feat_neg'].shape[0] + 1), axis=0)
                 hf['feat_neg'][-1] = spec
                 curr_t0 = curr_t0 + hop_seg_eval
@@ -241,7 +241,7 @@ def feature_transform(conf, mode: str = 'train'):
             curr_frame = strt_index_query
 
             while curr_frame + seg_len_eval <= last_frame:
-                spec = pcen[:, curr_frame:curr_frame + seg_len_eval]
+                spec = pcen[curr_frame:curr_frame + seg_len_eval].T
                 hf['feat_query'].resize((hf['feat_query'].shape[0] + 1), axis=0)
                 hf['feat_query'][-1] = spec
                 curr_frame = curr_frame + hop_seg_eval
