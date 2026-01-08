@@ -51,14 +51,16 @@ def _create_patches(
 
     label_list: List[str] = []
     for index in range(len(start_time)):
-        str_ind = start_time[index]
-        end_ind = end_time[index]
+        str_ind = max(start_time[index], 0)
+        end_ind = min(end_time[index], pcen.shape[0])
+        if end_ind <= str_ind:
+            continue
         label = cls_list[index]
 
-        def _pad_to_len(arr: np.ndarray, target_len: int) -> np.ndarray:
+        def _pad_to_len(arr: np.ndarray, target_len: int) -> np.ndarray | None:
             # make sure every patch matches seg_len
             if arr.shape[0] == 0:
-                return arr
+                return None
             if arr.shape[0] < target_len:
                 repeat_num = int(target_len / arr.shape[0]) + 1
                 arr = np.tile(arr, (repeat_num, 1))
@@ -70,6 +72,9 @@ def _create_patches(
             while end_ind - (str_ind + shift) > seg_len:
                 pcen_patch = pcen[int(str_ind + shift):int(str_ind + shift + seg_len)]
                 pcen_patch = _pad_to_len(pcen_patch, seg_len)
+                if pcen_patch is None:
+                    shift = shift + hop_seg
+                    continue
                 hf['features'].resize((file_index + 1, seg_len, pcen_patch.shape[1]))
                 hf['features'][file_index] = pcen_patch
                 label_list.append(label)
@@ -78,10 +83,11 @@ def _create_patches(
 
             pcen_patch_last = pcen[end_ind - seg_len:end_ind]
             pcen_patch_last = _pad_to_len(pcen_patch_last, seg_len)
-            hf['features'].resize((file_index + 1, seg_len, pcen_patch_last.shape[1]))
-            hf['features'][file_index] = pcen_patch_last
-            label_list.append(label)
-            file_index += 1
+            if pcen_patch_last is not None:
+                hf['features'].resize((file_index + 1, seg_len, pcen_patch_last.shape[1]))
+                hf['features'][file_index] = pcen_patch_last
+                label_list.append(label)
+                file_index += 1
         else:
             # if patch is shorter than seg_len, tile it
             pcen_patch = pcen[str_ind:end_ind]
@@ -91,10 +97,11 @@ def _create_patches(
                 continue
 
             pcen_patch_new = _pad_to_len(pcen_patch, seg_len)
-            hf['features'].resize((file_index + 1, seg_len, pcen_patch_new.shape[1]))
-            hf['features'][file_index] = pcen_patch_new
-            label_list.append(label)
-            file_index += 1
+            if pcen_patch_new is not None:
+                hf['features'].resize((file_index + 1, seg_len, pcen_patch_new.shape[1]))
+                hf['features'][file_index] = pcen_patch_new
+                label_list.append(label)
+                file_index += 1
 
     print("Total files created : {}".format(file_index))
     return label_list
