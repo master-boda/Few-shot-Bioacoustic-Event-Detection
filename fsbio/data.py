@@ -39,7 +39,7 @@ class DataBuilder:
 
     def __init__(self, conf):
         hdf_path = os.path.join(conf.path.feat_train, 'Mel_train.h5')
-        hdf_train = h5py.File(hdf_path, 'r+')
+        hdf_train = h5py.File(hdf_path, 'r')
         self.x = hdf_train['features'][:]
         self.labels = [s.decode() for s in hdf_train['labels'][:]]
 
