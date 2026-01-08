@@ -55,19 +55,30 @@ def _create_patches(
         end_ind = end_time[index]
         label = cls_list[index]
 
+        def _pad_to_len(arr: np.ndarray, target_len: int) -> np.ndarray:
+            # make sure every patch matches seg_len
+            if arr.shape[0] == 0:
+                return arr
+            if arr.shape[0] < target_len:
+                repeat_num = int(target_len / arr.shape[0]) + 1
+                arr = np.tile(arr, (repeat_num, 1))
+            return arr[:target_len]
+
         # extract segments with hop_seg stride
         if end_ind - str_ind > seg_len:
             shift = 0
             while end_ind - (str_ind + shift) > seg_len:
                 pcen_patch = pcen[int(str_ind + shift):int(str_ind + shift + seg_len)]
-                hf['features'].resize((file_index + 1, pcen_patch.shape[0], pcen_patch.shape[1]))
+                pcen_patch = _pad_to_len(pcen_patch, seg_len)
+                hf['features'].resize((file_index + 1, seg_len, pcen_patch.shape[1]))
                 hf['features'][file_index] = pcen_patch
                 label_list.append(label)
                 file_index += 1
                 shift = shift + hop_seg
 
             pcen_patch_last = pcen[end_ind - seg_len:end_ind]
-            hf['features'].resize((file_index + 1, pcen_patch.shape[0], pcen_patch.shape[1]))
+            pcen_patch_last = _pad_to_len(pcen_patch_last, seg_len)
+            hf['features'].resize((file_index + 1, seg_len, pcen_patch_last.shape[1]))
             hf['features'][file_index] = pcen_patch_last
             label_list.append(label)
             file_index += 1
@@ -79,10 +90,8 @@ def _create_patches(
                 print("The patch is of 0 length")
                 continue
 
-            repeat_num = int(seg_len / (pcen_patch.shape[0])) + 1
-            pcen_patch_new = np.tile(pcen_patch, (repeat_num, 1))
-            pcen_patch_new = pcen_patch_new[0:int(seg_len)]
-            hf['features'].resize((file_index + 1, pcen_patch_new.shape[0], pcen_patch_new.shape[1]))
+            pcen_patch_new = _pad_to_len(pcen_patch, seg_len)
+            hf['features'].resize((file_index + 1, seg_len, pcen_patch_new.shape[1]))
             hf['features'][file_index] = pcen_patch_new
             label_list.append(label)
             file_index += 1
