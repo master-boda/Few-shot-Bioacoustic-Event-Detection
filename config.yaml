@@ -29,17 +29,27 @@ features:
 train:
   num_classes: 15
   n_shot: 5
-  k_way : 5
+  k_way: 5
   device: cuda
   lr_rate: 0.0001
   scheduler_gamma: 0.5
   scheduler_step_size: 10
   epochs: 50
   num_episodes: 500
-  encoder: Resnet  # Protonet or Resnet
+  encoder: Resnet  # resnet or transformer
+
+model:
+  transformer:
+    d_model: 128
+    nhead: 4
+    num_layers: 2
+    dim_feedforward: 256
+    dropout: 0.1
+    conv_stem: true
+    conv_channels: [32, 64]
 eval:
   samples_neg: 50
   iterations: 10
   query_batch_size: 8
-  negative_set_batch_size : 16
+  negative_set_batch_size: 16
   threshold: 0.45

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -86,6 +87,7 @@ class ResNet(nn.Module):
         self.dropout = nn.Dropout(p=1 - self.keep_prob, inplace=False)
         self.drop_rate = drop_rate
         self.pool = nn.AdaptiveAvgPool2d((4, 2))
+        self.embedding_dim = 64 * 4 * 2
 
         for module in self.modules():
             if isinstance(module, nn.Conv2d):
@@ -120,3 +122,101 @@ class ResNet(nn.Module):
         x = self.pool(x)
         x = x.view(x.size(0), -1)
         return x
+
+
+class TinyTransformer(nn.Module):
+    # small transformer encoder for few-shot embeddings
+
+    def __init__(
+        self,
+        n_mels: int,
+        d_model: int = 128,
+        nhead: int = 4,
+        num_layers: int = 2,
+        dim_feedforward: int = 256,
+        dropout: float = 0.1,
+        conv_stem: bool = False,
+        conv_channels: list[int] | None = None,
+    ):
+        super().__init__()
+        self.n_mels = n_mels
+        self.conv_stem = conv_stem
+        if conv_channels is None:
+            conv_channels = [32, 64]
+        self.conv_channels = conv_channels
+        if self.conv_stem:
+            layers = []
+            in_ch = 1
+            for out_ch in self.conv_channels:
+                layers.append(nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=1, padding=1))
+                layers.append(nn.BatchNorm2d(out_ch))
+                layers.append(nn.ReLU(inplace=True))
+                layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
+                in_ch = out_ch
+            self.stem = nn.Sequential(*layers)
+            self.proj = nn.Linear(self._stem_feat_dim(), d_model)
+        else:
+            self.proj = nn.Linear(n_mels, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
+            activation="gelu",
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.norm = nn.LayerNorm(d_model)
+        self.embedding_dim = d_model
+
+    def _stem_feat_dim(self) -> int:
+        # estimate freq dim after maxpool
+        freq = self.n_mels
+        for _ in self.conv_channels:
+            freq = freq // 2
+        return self.conv_channels[-1] * max(freq, 1)
+
+    def _positional_encoding(self, length: int, dim: int, device: torch.device) -> torch.Tensor:
+        # sinusoidal positional encoding
+        position = torch.arange(length, device=device).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, dim, 2, device=device) * (-math.log(10000.0) / dim))
+        pe = torch.zeros(length, dim, device=device)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        return pe.unsqueeze(0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[2] != self.n_mels and x.shape[1] == self.n_mels:
+            x = x.transpose(1, 2)
+        if x.shape[2] != self.n_mels:
+            raise ValueError(f"expected n_mels={self.n_mels}, got {x.shape[2]}")
+        if self.conv_stem:
+            # conv stem expects (batch, 1, time, freq)
+            x = x.unsqueeze(1)
+            x = self.stem(x)
+            x = x.permute(0, 2, 1, 3).contiguous()
+            x = x.view(x.shape[0], x.shape[1], -1)
+        x = self.proj(x)
+        x = x + self._positional_encoding(x.shape[1], x.shape[2], x.device)
+        x = self.encoder(x)
+        x = self.norm(x)
+        return x.mean(dim=1)
+
+
+def build_encoder(conf) -> nn.Module:
+    # select encoder by config
+    name = str(conf.train.get("encoder", "Resnet")).lower()
+    if name in {"transformer", "tinytransformer"}:
+        model_cfg = conf.get("model", {})
+        t_cfg = model_cfg.get("transformer", {})
+        return TinyTransformer(
+            n_mels=int(conf.features.n_mels),
+            d_model=int(t_cfg.get("d_model", 128)),
+            nhead=int(t_cfg.get("nhead", 4)),
+            num_layers=int(t_cfg.get("num_layers", 2)),
+            dim_feedforward=int(t_cfg.get("dim_feedforward", 256)),
+            dropout=float(t_cfg.get("dropout", 0.1)),
+            conv_stem=bool(t_cfg.get("conv_stem", False)),
+            conv_channels=list(t_cfg.get("conv_channels", [32, 64])),
+        )
+    return ResNet()

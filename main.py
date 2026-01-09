@@ -11,7 +11,7 @@ from tqdm import tqdm
 from fsbio.data import DataBuilder
 from fsbio.features import feature_transform
 from fsbio.metrics import evaluate_prototypes, prototypical_loss
-from fsbio.model import ResNet
+from fsbio.model import build_encoder
 from fsbio.sampler import EpisodicBatchSampler
 
 
@@ -152,7 +152,7 @@ def main(conf: DictConfig):
             shuffle=False,
         )
 
-        encoder = ResNet()
+        encoder = build_encoder(conf)
 
         best_acc, _ = train_protonet(encoder, train_loader, valid_loader, conf, num_episodes_tr, num_episodes_vd)
         print("Best accuracy of the model on training set is {}".format(best_acc))

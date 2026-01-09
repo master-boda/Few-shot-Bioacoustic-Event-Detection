@@ -8,7 +8,7 @@ from torch.nn import functional as F
 from tqdm import tqdm
 
 from .data import EvalBuilder
-from .model import ResNet
+from .model import build_encoder
 
 
 def euclidean_dist(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -84,7 +84,7 @@ def evaluate_prototypes(conf=None, hdf_eval=None, device=None, strt_index_query=
         shuffle=False,
     )
 
-    encoder = ResNet()
+    encoder = build_encoder(conf)
 
     if device == 'cpu':
         state_dict = torch.load(conf.path.best_model, map_location=torch.device('cpu'))
@@ -96,16 +96,14 @@ def evaluate_prototypes(conf=None, hdf_eval=None, device=None, strt_index_query=
     encoder.eval()
 
     # compute positive prototype
-    emb_dim = 512
-    pos_set_feat = torch.zeros(0, emb_dim).cpu()
+    pos_set_feat = []
     with torch.no_grad():
         for batch in tqdm(torch.utils.data.DataLoader(torch.utils.data.TensorDataset(x_pos, y_pos))):
             x, _ = batch
             x = x.to(device)
             feat = encoder(x).cpu()
-            feat_mean = feat.mean(dim=0).unsqueeze(0)
-            pos_set_feat = torch.cat((pos_set_feat, feat_mean), dim=0)
-    proto_pos = pos_set_feat.mean(dim=0)
+            pos_set_feat.append(feat.mean(dim=0))
+    proto_pos = torch.stack(pos_set_feat, dim=0).mean(dim=0)
 
     prob_comb = []
     for i in range(conf.eval.iterations):
@@ -117,7 +115,7 @@ def evaluate_prototypes(conf=None, hdf_eval=None, device=None, strt_index_query=
             batch_size=conf.eval.negative_set_batch_size,
             shuffle=False,
         )
-        neg_sum = torch.zeros(emb_dim).cpu()
+        neg_sum = torch.zeros_like(proto_pos).cpu()
         neg_count = 0
         with torch.no_grad():
             for batch in neg_loader:
