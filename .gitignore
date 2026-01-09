@@ -13,3 +13,4 @@ paper/*.fls
 paper/*.log
 paper/*.synctex.gz
 paper/*.pdf
+.goutputstream-*
