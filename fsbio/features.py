@@ -115,6 +115,8 @@ class FeatureExtractor:
         self.n_fft = conf.features.n_fft
         self.hop = conf.features.hop_mel
         self.n_mels = conf.features.n_mels
+        self.n_mfcc = int(conf.features.get("n_mfcc", 0))
+        self.use_delta_mfcc = bool(conf.features.get("use_delta_mfcc", False))
         self.fmax = conf.features.fmax
 
     def extract_feature(self, audio: np.ndarray) -> np.ndarray:
@@ -128,7 +130,12 @@ class FeatureExtractor:
             fmax=self.fmax,
         )
         pcen = librosa.core.pcen(mel_spec, sr=22050)
-        return pcen.astype(np.float32)
+        if not self.use_delta_mfcc:
+            return pcen.astype(np.float32)
+        mfcc = librosa.feature.mfcc(S=librosa.power_to_db(mel_spec), n_mfcc=self.n_mfcc)
+        d_mfcc = librosa.feature.delta(mfcc)
+        combo = np.concatenate([pcen, d_mfcc], axis=0)
+        return combo.astype(np.float32)
 
 
 def _extract_feature(audio_path: str, extractor: FeatureExtractor, conf) -> np.ndarray:
@@ -145,6 +152,9 @@ def feature_transform(conf, mode: str = 'train'):
     seg_len = int(round(conf.features.seg_len * fps))
     hop_seg = int(round(conf.features.hop_seg * fps))
     extension = "*.csv"
+    use_delta_mfcc = bool(conf.features.get("use_delta_mfcc", False))
+    n_mfcc = int(conf.features.get("n_mfcc", 0)) if use_delta_mfcc else 0
+    feat_dim = int(conf.features.n_mels) + n_mfcc
 
     extractor = FeatureExtractor(conf)
 
@@ -164,8 +174,8 @@ def feature_transform(conf, mode: str = 'train'):
         hf = h5py.File(hdf_tr, 'w')
         hf.create_dataset(
             'features',
-            shape=(0, seg_len, conf.features.n_mels),
-            maxshape=(None, seg_len, conf.features.n_mels),
+            shape=(0, seg_len, feat_dim),
+            maxshape=(None, seg_len, feat_dim),
         )
         label_tr: List[List[str]] = []
 
@@ -234,9 +244,9 @@ def feature_transform(conf, mode: str = 'train'):
             print("Creating Positive dataset")
             print("Creating query dataset")
 
-            hf.create_dataset('feat_pos', shape=(0, conf.features.n_mels, seg_len_eval), maxshape=(None, conf.features.n_mels, seg_len_eval))
-            hf.create_dataset('feat_neg', shape=(0, conf.features.n_mels, seg_len_eval), maxshape=(None, conf.features.n_mels, seg_len_eval))
-            hf.create_dataset('feat_query', shape=(0, conf.features.n_mels, seg_len_eval), maxshape=(None, conf.features.n_mels, seg_len_eval))
+            hf.create_dataset('feat_pos', shape=(0, feat_dim, seg_len_eval), maxshape=(None, feat_dim, seg_len_eval))
+            hf.create_dataset('feat_neg', shape=(0, feat_dim, seg_len_eval), maxshape=(None, feat_dim, seg_len_eval))
+            hf.create_dataset('feat_query', shape=(0, feat_dim, seg_len_eval), maxshape=(None, feat_dim, seg_len_eval))
 
             def _tile_to_len(arr: np.ndarray, target_len: int) -> np.ndarray | None:
                 # pad short segments by tiling to target length

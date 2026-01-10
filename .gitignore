@@ -14,3 +14,9 @@ paper/*.log
 paper/*.synctex.gz
 paper/*.pdf
 .goutputstream-*
+
+# run artifacts
+Evaluation_report_*.json
+eval_output.csv
+new_eval_output.csv
+score_t*/

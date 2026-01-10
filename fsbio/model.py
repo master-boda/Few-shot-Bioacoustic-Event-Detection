@@ -206,11 +206,14 @@ class TinyTransformer(nn.Module):
 def build_encoder(conf) -> nn.Module:
     # select encoder by config
     name = str(conf.train.get("encoder", "Resnet")).lower()
+    use_delta_mfcc = bool(conf.features.get("use_delta_mfcc", False))
+    n_mfcc = int(conf.features.get("n_mfcc", 0)) if use_delta_mfcc else 0
+    feat_dim = int(conf.features.n_mels) + n_mfcc
     if name in {"transformer", "tinytransformer"}:
         model_cfg = conf.get("model", {})
         t_cfg = model_cfg.get("transformer", {})
         return TinyTransformer(
-            n_mels=int(conf.features.n_mels),
+            n_mels=feat_dim,
             d_model=int(t_cfg.get("d_model", 128)),
             nhead=int(t_cfg.get("nhead", 4)),
             num_layers=int(t_cfg.get("num_layers", 2)),
