@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from glob import glob
-from itertools import chain
 from typing import List, Tuple
 
 import h5py
@@ -44,10 +43,12 @@ def _create_patches(
 
     # for csv files with a column name call, use the global class name
     if 'CALL' in df_pos.columns:
-        cls_list = [glob_cls_name] * len(start_time)
+        labels_per_row = [[glob_cls_name] for _ in range(len(start_time))]
     else:
-        cls_list = [df_pos.columns[(df_pos == 'POS').loc[index]].values for index, _ in df_pos.iterrows()]
-        cls_list = list(chain.from_iterable(cls_list))
+        labels_per_row = []
+        for _, row in df_pos.iterrows():
+            row_labels = [col for col, val in row.items() if val == 'POS']
+            labels_per_row.append(row_labels)
 
     label_list: List[str] = []
     for index in range(len(start_time)):
@@ -55,7 +56,7 @@ def _create_patches(
         end_ind = min(end_time[index], pcen.shape[0])
         if end_ind <= str_ind:
             continue
-        label = cls_list[index]
+        row_labels = labels_per_row[index]
 
         def _pad_to_len(arr: np.ndarray, target_len: int) -> np.ndarray | None:
             # make sure every patch matches seg_len
@@ -66,6 +67,14 @@ def _create_patches(
                 arr = np.tile(arr, (repeat_num, 1))
             return arr[:target_len]
 
+        def _append_patch(patch: np.ndarray):
+            nonlocal file_index
+            for label in row_labels:
+                hf['features'].resize((file_index + 1, seg_len, patch.shape[1]))
+                hf['features'][file_index] = patch
+                label_list.append(label)
+                file_index += 1
+
         # extract segments with hop_seg stride
         if end_ind - str_ind > seg_len:
             shift = 0
@@ -75,19 +84,13 @@ def _create_patches(
                 if pcen_patch is None:
                     shift = shift + hop_seg
                     continue
-                hf['features'].resize((file_index + 1, seg_len, pcen_patch.shape[1]))
-                hf['features'][file_index] = pcen_patch
-                label_list.append(label)
-                file_index += 1
+                _append_patch(pcen_patch)
                 shift = shift + hop_seg
 
             pcen_patch_last = pcen[end_ind - seg_len:end_ind]
             pcen_patch_last = _pad_to_len(pcen_patch_last, seg_len)
             if pcen_patch_last is not None:
-                hf['features'].resize((file_index + 1, seg_len, pcen_patch_last.shape[1]))
-                hf['features'][file_index] = pcen_patch_last
-                label_list.append(label)
-                file_index += 1
+                _append_patch(pcen_patch_last)
         else:
             # if patch is shorter than seg_len, tile it
             pcen_patch = pcen[str_ind:end_ind]
@@ -98,10 +101,7 @@ def _create_patches(
 
             pcen_patch_new = _pad_to_len(pcen_patch, seg_len)
             if pcen_patch_new is not None:
-                hf['features'].resize((file_index + 1, seg_len, pcen_patch_new.shape[1]))
-                hf['features'][file_index] = pcen_patch_new
-                label_list.append(label)
-                file_index += 1
+                _append_patch(pcen_patch_new)
 
     print("Total files created : {}".format(file_index))
     return label_list
@@ -129,7 +129,7 @@ class FeatureExtractor:
             n_mels=self.n_mels,
             fmax=self.fmax,
         )
-        pcen = librosa.core.pcen(mel_spec, sr=22050)
+        pcen = librosa.core.pcen(mel_spec, sr=self.sr)
         if not self.use_delta_mfcc:
             return pcen.astype(np.float32)
         mfcc = librosa.feature.mfcc(S=librosa.power_to_db(mel_spec), n_mfcc=self.n_mfcc)
@@ -230,6 +230,7 @@ def feature_transform(conf, mode: str = 'train'):
             if len(index_sup) == 0:
                 hf.close()
                 continue
+            avg_shot_len = float(np.mean(end_time[index_sup] - start_time[index_sup]))
             max_len = max(end_time[index_sup] - start_time[index_sup])
             seg_len_eval = int(round(max_len * fps))
             # keep eval patches at least as long as training patches to avoid pooling collapse
@@ -244,19 +245,32 @@ def feature_transform(conf, mode: str = 'train'):
             print("Creating Positive dataset")
             print("Creating query dataset")
 
-            hf.create_dataset('feat_pos', shape=(0, feat_dim, seg_len_eval), maxshape=(None, feat_dim, seg_len_eval))
-            hf.create_dataset('feat_neg', shape=(0, feat_dim, seg_len_eval), maxshape=(None, feat_dim, seg_len_eval))
-            hf.create_dataset('feat_query', shape=(0, feat_dim, seg_len_eval), maxshape=(None, feat_dim, seg_len_eval))
+            hf.create_dataset('feat_pos', shape=(0, seg_len_eval, feat_dim), maxshape=(None, seg_len_eval, feat_dim))
+            hf.create_dataset('feat_neg', shape=(0, seg_len_eval, feat_dim), maxshape=(None, seg_len_eval, feat_dim))
+            hf.create_dataset('feat_query', shape=(0, seg_len_eval, feat_dim), maxshape=(None, seg_len_eval, feat_dim))
+            hf.create_dataset('avg_shot_len', data=[avg_shot_len])
 
             def _tile_to_len(arr: np.ndarray, target_len: int) -> np.ndarray | None:
                 # pad short segments by tiling to target length
-                if arr.shape[-1] == 0:
+                if arr.shape[0] == 0:
                     return None
-                if arr.shape[-1] < target_len:
-                    repeat_num = int(target_len / arr.shape[-1]) + 1
-                    arr = np.tile(arr, (1, repeat_num))
-                    arr = arr[:, :target_len]
+                if arr.shape[0] < target_len:
+                    repeat_num = int(target_len / arr.shape[0]) + 1
+                    arr = np.tile(arr, (repeat_num, 1))
+                    arr = arr[:target_len]
                 return arr
+
+            support_intervals = []
+            for idx in index_sup:
+                start_idx = int(round(start_time[idx] * fps))
+                end_idx = int(round(end_time[idx] * fps))
+                support_intervals.append((start_idx, end_idx))
+
+            def _overlaps_support(seg_start: int, seg_end: int) -> bool:
+                for sup_start, sup_end in support_intervals:
+                    if seg_start < sup_end and seg_end > sup_start:
+                        return True
+                return False
 
             # support features
             for index in range(len(index_sup)):
@@ -264,13 +278,13 @@ def feature_transform(conf, mode: str = 'train'):
                 end_idx = int(round(end_time[index_sup[index]] * fps))
                 if end_idx - start_idx > seg_len_eval:
                     while start_idx + seg_len_eval <= end_idx:
-                        spec = pcen[start_idx:start_idx + seg_len_eval].T
+                        spec = pcen[start_idx:start_idx + seg_len_eval]
                         start_idx += hop_seg_eval
                         hf['feat_pos'].resize((hf['feat_pos'].shape[0] + 1), axis=0)
                         hf['feat_pos'][-1] = spec
                 else:
                     if end_idx - start_idx > 0:
-                        spec = pcen[start_idx:end_idx].T
+                        spec = pcen[start_idx:end_idx]
                         spec = _tile_to_len(spec, seg_len_eval)
                         if spec is not None:
                             hf['feat_pos'].resize((hf['feat_pos'].shape[0] + 1), axis=0)
@@ -281,9 +295,12 @@ def feature_transform(conf, mode: str = 'train'):
             # pcen is time x mels here
             last_frame = pcen.shape[0]
             while curr_t0 + seg_len_eval <= last_frame:
-                spec = pcen[curr_t0:curr_t0 + seg_len_eval].T
-                hf['feat_neg'].resize((hf['feat_neg'].shape[0] + 1), axis=0)
-                hf['feat_neg'][-1] = spec
+                seg_start = curr_t0
+                seg_end = curr_t0 + seg_len_eval
+                if not _overlaps_support(seg_start, seg_end):
+                    spec = pcen[seg_start:seg_end]
+                    hf['feat_neg'].resize((hf['feat_neg'].shape[0] + 1), axis=0)
+                    hf['feat_neg'][-1] = spec
                 curr_t0 = curr_t0 + hop_seg_eval
 
             # query features after the shots
@@ -292,7 +309,7 @@ def feature_transform(conf, mode: str = 'train'):
             curr_frame = strt_index_query
 
             while curr_frame + seg_len_eval <= last_frame:
-                spec = pcen[curr_frame:curr_frame + seg_len_eval].T
+                spec = pcen[curr_frame:curr_frame + seg_len_eval]
                 hf['feat_query'].resize((hf['feat_query'].shape[0] + 1), axis=0)
                 hf['feat_query'][-1] = spec
                 curr_frame = curr_frame + hop_seg_eval

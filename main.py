@@ -111,6 +111,11 @@ def main(conf: DictConfig):
 
     if conf.set.train:
         os.makedirs(conf.path.Model, exist_ok=True)
+        hdf_path = os.path.join(conf.path.feat_train, 'Mel_train.h5')
+        if not os.path.exists(hdf_path):
+            raise FileNotFoundError(
+                f"training features not found at {hdf_path}. Run feature extraction or set set.features=true."
+            )
         init_seed()
 
         gen_train = DataBuilder(conf)
@@ -158,13 +163,18 @@ def main(conf: DictConfig):
         print("Best accuracy of the model on training set is {}".format(best_acc))
 
     if conf.set.eval:
-        device = 'cuda'
+        device = conf.train.device
+        if device == 'cuda' and not torch.cuda.is_available():
+            device = 'cpu'
         init_seed()
 
         name_arr = np.array([])
         onset_arr = np.array([])
         offset_arr = np.array([])
         all_feat_files = glob(os.path.join(conf.path.feat_eval, '**', '*.h5'), recursive=True)
+        if len(all_feat_files) == 0:
+            print(f"No evaluation features found under {conf.path.feat_eval}. Run feature extraction first.")
+            return
 
         for feat_file in all_feat_files:
             feat_name = feat_file.split('/')[-1]

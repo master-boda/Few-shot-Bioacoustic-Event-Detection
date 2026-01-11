@@ -72,14 +72,37 @@ class BasicBlock(nn.Module):
 class ResNet(nn.Module):
     # 9-layer resnet used in the baseline
 
-    def __init__(self, block=BasicBlock, keep_prob: float = 1.0, avg_pool: bool = True, drop_rate: float = 0.1, dropblock_size: int = 5):
+    def __init__(
+        self,
+        block=BasicBlock,
+        keep_prob: float = 1.0,
+        avg_pool: bool = True,
+        drop_rate: float = 0.1,
+        dropblock_size: int = 5,
+        pool_time_only: bool = False,
+    ):
         self.inplanes = 1
         super().__init__()
 
-        self.layer1 = self._make_layer(block, 64, stride=2, drop_rate=drop_rate)
-        self.layer2 = self._make_layer(block, 128, stride=2, drop_rate=drop_rate)
-        self.layer3 = self._make_layer(block, 64, stride=2, drop_rate=drop_rate, drop_block=True, block_size=dropblock_size)
-        self.layer4 = self._make_layer(block, 64, stride=2, drop_rate=drop_rate, drop_block=True, block_size=dropblock_size)
+        pool_stride = (2, 1) if pool_time_only else 2
+        self.layer1 = self._make_layer(block, 64, stride=pool_stride, drop_rate=drop_rate)
+        self.layer2 = self._make_layer(block, 128, stride=pool_stride, drop_rate=drop_rate)
+        self.layer3 = self._make_layer(
+            block,
+            64,
+            stride=pool_stride,
+            drop_rate=drop_rate,
+            drop_block=True,
+            block_size=dropblock_size,
+        )
+        self.layer4 = self._make_layer(
+            block,
+            64,
+            stride=pool_stride,
+            drop_rate=drop_rate,
+            drop_block=True,
+            block_size=dropblock_size,
+        )
         if avg_pool:
             self.avgpool = nn.AvgPool2d(5, stride=1)
         self.keep_prob = keep_prob
@@ -96,7 +119,7 @@ class ResNet(nn.Module):
                 nn.init.constant_(module.weight, 1)
                 nn.init.constant_(module.bias, 0)
 
-    def _make_layer(self, block, planes, stride: int = 1, drop_rate: float = 0.0, drop_block: bool = False, block_size: int = 1):
+    def _make_layer(self, block, planes, stride=1, drop_rate: float = 0.0, drop_block: bool = False, block_size: int = 1):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
@@ -222,4 +245,11 @@ def build_encoder(conf) -> nn.Module:
             conv_stem=bool(t_cfg.get("conv_stem", False)),
             conv_channels=list(t_cfg.get("conv_channels", [32, 64])),
         )
-    return ResNet()
+    model_cfg = conf.get("model", {})
+    r_cfg = model_cfg.get("resnet", {})
+    return ResNet(
+        avg_pool=bool(r_cfg.get("avg_pool", True)),
+        drop_rate=float(r_cfg.get("drop_rate", 0.1)),
+        dropblock_size=int(r_cfg.get("dropblock_size", 5)),
+        pool_time_only=bool(r_cfg.get("pool_time_only", False)),
+    )

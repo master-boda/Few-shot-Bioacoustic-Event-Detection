@@ -70,6 +70,9 @@ def evaluate_prototypes(conf=None, hdf_eval=None, device=None, strt_index_query=
     # inference loop for a single file
     gen_eval = EvalBuilder(hdf_eval, conf)
     x_pos, x_neg, x_query, hop_seg = gen_eval.generate_eval()
+    avg_shot_len = None
+    if 'avg_shot_len' in hdf_eval:
+        avg_shot_len = float(hdf_eval['avg_shot_len'][:][0])
 
     x_pos = torch.tensor(x_pos)
     y_pos = torch.zeros(x_pos.shape[0], dtype=torch.long)
@@ -150,6 +153,27 @@ def evaluate_prototypes(conf=None, hdf_eval=None, device=None, strt_index_query=
     offset = (offset_frames) * (hop_seg) * conf.features.hop_mel / conf.features.sr
     onset = onset + str_time_query
     offset = offset + str_time_query
+
+    if avg_shot_len is not None:
+        min_frac = conf.eval.get("min_duration_frac", 0.0)
+        merge_frac = conf.eval.get("merge_gap_frac", 0.0)
+        if min_frac > 0.0:
+            min_dur = avg_shot_len * float(min_frac)
+            keep = (offset - onset) >= min_dur
+            onset = onset[keep]
+            offset = offset[keep]
+        if merge_frac > 0.0 and len(onset) > 0:
+            merge_gap = avg_shot_len * float(merge_frac)
+            merged_onset = [onset[0]]
+            merged_offset = [offset[0]]
+            for start, end in zip(onset[1:], offset[1:]):
+                if start - merged_offset[-1] <= merge_gap:
+                    merged_offset[-1] = max(merged_offset[-1], end)
+                else:
+                    merged_onset.append(start)
+                    merged_offset.append(end)
+            onset = np.array(merged_onset)
+            offset = np.array(merged_offset)
 
     assert len(onset) == len(offset)
     return onset, offset

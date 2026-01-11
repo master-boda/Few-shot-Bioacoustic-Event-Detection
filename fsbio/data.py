@@ -42,10 +42,10 @@ class DataBuilder:
         hdf_train = h5py.File(hdf_path, 'r')
         self.x = hdf_train['features'][:]
         self.labels = [s.decode() for s in hdf_train['labels'][:]]
+        hdf_train.close()
 
-        class_set = set(self.labels)
+        class_set = sorted(set(self.labels))
         self.y = labels_to_int(self.labels, class_set)
-        self.x, self.y = balance_classes(self.x, self.y)
 
         array_train = np.arange(len(self.x))
         _, _, _, _, train_array, valid_array = train_test_split(
@@ -62,8 +62,10 @@ class DataBuilder:
         # returns normalized train and val splits
         train_array = sorted(self.train_index)
         valid_array = sorted(self.valid_index)
-        x_train = self._scale(self.x[train_array])
-        y_train = self.y[train_array]
+        x_train_raw = self.x[train_array]
+        y_train_raw = self.y[train_array]
+        x_train, y_train = balance_classes(x_train_raw, y_train_raw)
+        x_train = self._scale(x_train)
         x_val = self._scale(self.x[valid_array])
         y_val = self.y[valid_array]
         return x_train, y_train, x_val, y_val
