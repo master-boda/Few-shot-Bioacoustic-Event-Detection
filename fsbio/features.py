@@ -232,13 +232,25 @@ def feature_transform(conf, mode: str = 'train'):
                 continue
             avg_shot_len = float(np.mean(end_time[index_sup] - start_time[index_sup]))
             max_len = max(end_time[index_sup] - start_time[index_sup])
-            seg_len_eval = int(round(max_len * fps))
+            max_len_frames = int(round(max_len * fps))
+            seglen_lim = int(conf.eval.get("test_seglen_len_lim", 30))
+            if max_len_frames < 8:
+                seg_len_eval = 8
+            elif max_len_frames < seglen_lim:
+                seg_len_eval = max_len_frames
+            elif max_len_frames <= seglen_lim * 2:
+                seg_len_eval = max_len_frames // 2
+            elif max_len_frames < 500:
+                seg_len_eval = max_len_frames // 4
+            else:
+                seg_len_eval = max_len_frames // 8
             # keep eval patches at least as long as training patches to avoid pooling collapse
             seg_len_eval = max(seg_len_eval, seg_len)
             if seg_len_eval <= 0:
                 hf.close()
                 continue
-            hop_seg_eval = int(round(seg_len_eval / 2))
+            hop_div = int(conf.eval.get("test_hoplen_fenmu", 3))
+            hop_seg_eval = max(int(round(seg_len_eval / hop_div)), 1)
 
             print("Segment length for file is {}".format(seg_len_eval))
             print("Creating negative dataset")
@@ -265,12 +277,19 @@ def feature_transform(conf, mode: str = 'train'):
                 start_idx = int(round(start_time[idx] * fps))
                 end_idx = int(round(end_time[idx] * fps))
                 support_intervals.append((start_idx, end_idx))
+            support_intervals.sort(key=lambda x: x[0])
 
-            def _overlaps_support(seg_start: int, seg_end: int) -> bool:
-                for sup_start, sup_end in support_intervals:
-                    if seg_start < sup_end and seg_end > sup_start:
-                        return True
-                return False
+            end_limit = int(round(end_time[index_sup[-1]] * fps))
+            gap_intervals = []
+            curr = 0
+            for start_idx, end_idx in support_intervals:
+                if curr >= end_limit:
+                    break
+                if start_idx > curr:
+                    gap_end = min(start_idx, end_limit)
+                    if gap_end > curr:
+                        gap_intervals.append((curr, gap_end))
+                curr = max(curr, end_idx)
 
             # support features
             for index in range(len(index_sup)):
@@ -290,18 +309,33 @@ def feature_transform(conf, mode: str = 'train'):
                             hf['feat_pos'].resize((hf['feat_pos'].shape[0] + 1), axis=0)
                             hf['feat_pos'][-1] = spec
 
-            # negative features from full audio
-            curr_t0 = 0
+            # negative features from gaps between support events
             # pcen is time x mels here
             last_frame = pcen.shape[0]
-            while curr_t0 + seg_len_eval <= last_frame:
-                seg_start = curr_t0
-                seg_end = curr_t0 + seg_len_eval
-                if not _overlaps_support(seg_start, seg_end):
-                    spec = pcen[seg_start:seg_end]
+            for gap_start, gap_end in gap_intervals:
+                if gap_end <= gap_start:
+                    continue
+                if gap_end - gap_start >= seg_len_eval:
+                    shift = 0
+                    while gap_start + shift + seg_len_eval <= gap_end:
+                        spec = pcen[gap_start + shift:gap_start + shift + seg_len_eval]
+                        hf['feat_neg'].resize((hf['feat_neg'].shape[0] + 1), axis=0)
+                        hf['feat_neg'][-1] = spec
+                        shift = shift + hop_seg_eval
+                    last_patch = pcen[gap_end - seg_len_eval:gap_end]
                     hf['feat_neg'].resize((hf['feat_neg'].shape[0] + 1), axis=0)
-                    hf['feat_neg'][-1] = spec
-                curr_t0 = curr_t0 + hop_seg_eval
+                    hf['feat_neg'][-1] = last_patch
+                else:
+                    spec = pcen[gap_start:gap_end]
+                    spec = _tile_to_len(spec, seg_len_eval)
+                    if spec is not None:
+                        hf['feat_neg'].resize((hf['feat_neg'].shape[0] + 1), axis=0)
+                        hf['feat_neg'][-1] = spec
+
+            if hf['feat_neg'].shape[0] == 0:
+                print(f"Warning: no negative gaps found for {audio_path}; skipping file.")
+                hf.close()
+                continue
 
             # query features after the shots
             strt_index_query = int(round(end_time[index_sup[-1]] * fps))

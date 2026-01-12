@@ -1,4 +1,9 @@
+import csv
+import json
 import os
+import re
+import sys
+from datetime import datetime
 from glob import glob
 
 import h5py
@@ -24,7 +29,105 @@ def init_seed():
 
 # training loop for episodic proto
 
-def train_protonet(encoder, train_loader, valid_loader, conf, num_batches_tr, num_batches_vd):
+def _write_train_metrics(run_dir, rows, plot: bool = True):
+    if run_dir is None or len(rows) == 0:
+        return
+    metrics_path = os.path.join(run_dir, "train_metrics.csv")
+    with open(metrics_path, "w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["epoch", "lr", "train_loss", "train_acc", "val_loss", "val_acc"],
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    if not plot:
+        return
+    try:
+        import matplotlib.pyplot as plt
+
+        epochs = [row["epoch"] for row in rows]
+        train_loss = [row["train_loss"] for row in rows]
+        val_loss = [row["val_loss"] for row in rows]
+        train_acc = [row["train_acc"] for row in rows]
+        val_acc = [row["val_acc"] for row in rows]
+
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        axes[0].plot(epochs, train_loss, label="train")
+        axes[0].plot(epochs, val_loss, label="val")
+        axes[0].set_title("Loss")
+        axes[0].set_xlabel("epoch")
+        axes[0].legend()
+
+        axes[1].plot(epochs, train_acc, label="train")
+        axes[1].plot(epochs, val_acc, label="val")
+        axes[1].set_title("Accuracy")
+        axes[1].set_xlabel("epoch")
+        axes[1].legend()
+
+        fig.tight_layout()
+        fig.savefig(os.path.join(run_dir, "train_curves.png"))
+        plt.close(fig)
+    except Exception as exc:
+        print(f"Failed to plot metrics: {exc}")
+
+
+def _sanitize_tag(tag: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", tag).strip("-")
+
+
+def _get_run_dir(conf):
+    base_dir = conf.path.get("output_dir", os.path.join(conf.path.root_dir, "outputs"))
+    os.makedirs(base_dir, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    parts = []
+    if conf.set.get("features"):
+        parts.append("features")
+    if conf.set.get("train"):
+        parts.append("train")
+    if conf.set.get("eval"):
+        parts.append("eval")
+    if not parts:
+        parts.append("run")
+    label = "_".join(parts)
+    if conf.eval.get("sweep", False):
+        label = f"{label}_sweep"
+    run_tag = conf.get("run_tag") or conf.eval.get("run_tag") or conf.train.get("run_tag")
+    if run_tag:
+        label = f"{label}_{_sanitize_tag(str(run_tag))}"
+    run_dir = os.path.join(base_dir, f"{label}_{stamp}")
+    os.makedirs(run_dir, exist_ok=True)
+    return run_dir
+
+
+def _maybe_evaluate_predictions(conf, pred_file, run_dir):
+    if not conf.eval.get("compute_metrics", False):
+        return
+    if conf.eval.get("sweep", False):
+        print("Skipping metric evaluation for sweep outputs.")
+        return
+    eval_dir = os.path.join(conf.path.root_dir, "evaluation_metrics")
+    sys.path.insert(0, eval_dir)
+    try:
+        import evaluation as eval_mod
+    finally:
+        sys.path.pop(0)
+    team = conf.eval.get("metrics_team", "TESTteam")
+    dataset = conf.eval.get("metrics_dataset", "VAL")
+    eval_mod.evaluate(pred_file, conf.path.eval_dir, team, dataset, run_dir)
+    report_glob = os.path.join(run_dir, f"Evaluation_report_{team}_{dataset}_*.json")
+    reports = sorted(glob(report_glob))
+    if reports:
+        with open(reports[-1], "r") as handle:
+            report = json.load(handle)
+        overall = report.get("overall_scores", {})
+        precision = overall.get("precision")
+        recall = overall.get("recall")
+        fmeasure = overall.get("fmeasure (percentage)")
+        if precision is not None and recall is not None and fmeasure is not None:
+            print(f"Eval summary: precision={precision} recall={recall} fmeasure%={fmeasure}")
+
+
+def train_protonet(encoder, train_loader, valid_loader, conf, num_batches_tr, num_batches_vd, run_dir=None):
     if conf.train.device == 'cuda':
         device = torch.device('cuda')
     else:
@@ -45,9 +148,11 @@ def train_protonet(encoder, train_loader, valid_loader, conf, num_batches_tr, nu
     val_acc = []
     best_val_acc = 0.0
     encoder.to(device)
+    epoch_rows = []
 
     for epoch in range(conf.train.epochs):
         print("Epoch {}".format(epoch))
+        cur_lr = optim.param_groups[0]["lr"]
         train_iterator = iter(train_loader)
         for batch in tqdm(train_iterator):
             optim.zero_grad()
@@ -82,6 +187,16 @@ def train_protonet(encoder, train_loader, valid_loader, conf, num_batches_tr, nu
         avg_loss_vd = np.mean(val_loss[-num_batches_vd:])
         avg_acc_vd = np.mean(val_acc[-num_batches_vd:])
         print('Epoch {}, Validation loss {:.4f}, Validation accuracy {:.4f}'.format(epoch, avg_loss_vd, avg_acc_vd))
+        epoch_rows.append(
+            {
+                "epoch": epoch,
+                "lr": cur_lr,
+                "train_loss": float(avg_loss_tr),
+                "train_acc": float(avg_acc_tr),
+                "val_loss": float(avg_loss_vd),
+                "val_acc": float(avg_acc_vd),
+            }
+        )
 
         if avg_acc_vd > best_val_acc:
             print("Saving the best model with valdation accuracy {}".format(avg_acc_vd))
@@ -89,6 +204,8 @@ def train_protonet(encoder, train_loader, valid_loader, conf, num_batches_tr, nu
             torch.save({'encoder': encoder.state_dict()}, best_model_path)
 
     torch.save({'encoder': encoder.state_dict()}, last_model_path)
+    if conf.train.get("log_metrics", True):
+        _write_train_metrics(run_dir, epoch_rows, plot=bool(conf.train.get("plot_metrics", True)))
     return best_val_acc, encoder
 
 
@@ -98,6 +215,10 @@ def main(conf: DictConfig):
     os.makedirs(conf.path.feat_path, exist_ok=True)
     os.makedirs(conf.path.feat_train, exist_ok=True)
     os.makedirs(conf.path.feat_eval, exist_ok=True)
+
+    run_dir = None
+    if conf.set.train or conf.set.eval:
+        run_dir = _get_run_dir(conf)
 
     if conf.set.features:
         print(" --Feature Extraction Stage--")
@@ -159,7 +280,15 @@ def main(conf: DictConfig):
 
         encoder = build_encoder(conf)
 
-        best_acc, _ = train_protonet(encoder, train_loader, valid_loader, conf, num_episodes_tr, num_episodes_vd)
+        best_acc, _ = train_protonet(
+            encoder,
+            train_loader,
+            valid_loader,
+            conf,
+            num_episodes_tr,
+            num_episodes_vd,
+            run_dir=run_dir,
+        )
         print("Best accuracy of the model on training set is {}".format(best_acc))
 
     if conf.set.eval:
@@ -171,6 +300,8 @@ def main(conf: DictConfig):
         name_arr = np.array([])
         onset_arr = np.array([])
         offset_arr = np.array([])
+        sweep_enabled = bool(conf.eval.get("sweep", False))
+        sweep_data = {}
         all_feat_files = glob(os.path.join(conf.path.feat_eval, '**', '*.h5'), recursive=True)
         if len(all_feat_files) == 0:
             print(f"No evaluation features found under {conf.path.feat_eval}. Run feature extraction first.")
@@ -184,19 +315,47 @@ def main(conf: DictConfig):
             hdf_eval = h5py.File(feat_file, 'r')
             strt_index_query = hdf_eval['start_index_query'][:][0]
 
-            onset, offset = evaluate_prototypes(conf, hdf_eval, device, strt_index_query)
+            onset_offset = evaluate_prototypes(conf, hdf_eval, device, strt_index_query)
             hdf_eval.close()
 
-            name_arr = np.append(name_arr, np.repeat(audio_name, len(onset)))
-            onset_arr = np.append(onset_arr, onset)
-            offset_arr = np.append(offset_arr, offset)
+            if sweep_enabled:
+                for thresh, (onset, offset) in onset_offset.items():
+                    if thresh not in sweep_data:
+                        sweep_data[thresh] = {
+                            "name": np.array([]),
+                            "onset": np.array([]),
+                            "offset": np.array([]),
+                        }
+                    sweep_data[thresh]["name"] = np.append(
+                        sweep_data[thresh]["name"], np.repeat(audio_name, len(onset))
+                    )
+                    sweep_data[thresh]["onset"] = np.append(sweep_data[thresh]["onset"], onset)
+                    sweep_data[thresh]["offset"] = np.append(sweep_data[thresh]["offset"], offset)
+            else:
+                onset, offset = onset_offset
+                name_arr = np.append(name_arr, np.repeat(audio_name, len(onset)))
+                onset_arr = np.append(onset_arr, onset)
+                offset_arr = np.append(offset_arr, offset)
 
-        if len(name_arr) > 0:
-            out_arr = np.vstack((name_arr, onset_arr, offset_arr)).T
-            out_path = os.path.join(conf.path.root_dir, 'eval_output.csv')
-            np.savetxt(out_path, out_arr, delimiter=',', fmt='%s', header='Audiofilename,Starttime,Endtime', comments='')
+        if sweep_enabled:
+            if len(sweep_data) == 0:
+                print('No detections found')
+                return
+            for thresh, payload in sweep_data.items():
+                if len(payload["name"]) == 0:
+                    continue
+                out_arr = np.vstack((payload["name"], payload["onset"], payload["offset"])).T
+                thresh_tag = f"{thresh:.2f}".rstrip("0").rstrip(".").replace(".", "p")
+                out_path = os.path.join(run_dir or conf.path.root_dir, f'eval_output_thresh_{thresh_tag}.csv')
+                np.savetxt(out_path, out_arr, delimiter=',', fmt='%s', header='Audiofilename,Starttime,Endtime', comments='')
         else:
-            print('No detections found')
+            if len(name_arr) > 0:
+                out_arr = np.vstack((name_arr, onset_arr, offset_arr)).T
+                out_path = os.path.join(run_dir or conf.path.root_dir, 'eval_output.csv')
+                np.savetxt(out_path, out_arr, delimiter=',', fmt='%s', header='Audiofilename,Starttime,Endtime', comments='')
+                _maybe_evaluate_predictions(conf, out_path, run_dir or conf.path.root_dir)
+            else:
+                print('No detections found')
 
 
 if __name__ == '__main__':

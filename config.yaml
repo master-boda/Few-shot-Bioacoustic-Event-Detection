@@ -1,11 +1,27 @@
 eval:
-  iterations: 10
+  compute_metrics: false
+  iterations: 6
   merge_gap_frac: 0.15
   negative_set_batch_size: 8
-  min_duration_frac: 0.25
+  min_duration_frac: 0.1
+  postprocess: true
   query_batch_size: 4
-  samples_neg: 50
-  threshold: 0.45
+  samples_neg: 30
+  run_tag: null
+  transductive: true
+  transductive_steps: 2
+  transductive_temp: 1.0
+  transductive_query_weight: 0.1
+  sweep: true
+  sweep_start: 0.2
+  sweep_stop: 0.9
+  sweep_step: 0.05
+  sweep_thresholds: null
+  test_hoplen_fenmu: 3
+  test_seglen_len_lim: 30
+  threshold: 0.6
+  metrics_team: TESTteam
+  metrics_dataset: VAL
 features:
   eps: 2.220446049250313e-16
   fmax: 11025
@@ -14,24 +30,14 @@ features:
   hop_seg: 0.1
   n_fft: 512
   n_mels: 128
-  n_mfcc: 0
+  n_mfcc: 40
   seg_len: 0.2
   sr: 22050
   train_limit: 0
-  use_delta_mfcc: false
+  use_delta_mfcc: true
 model:
   resnet:
     pool_time_only: true
-  transformer:
-    conv_channels:
-    - 32
-    - 64
-    conv_stem: true
-    d_model: 128
-    dim_feedforward: 256
-    dropout: 0.1
-    nhead: 4
-    num_layers: 2
 path:
   Model: ${path.root_dir}/Model
   best_model: ${path.Model}/best_model.pth
@@ -40,6 +46,7 @@ path:
   feat_path: ${path.root_dir}/Features
   feat_train: ${path.feat_path}/feat_train
   last_model: ${path.Model}/last_model.pth
+  output_dir: ${path.root_dir}/outputs
   root_dir: /media/vic/ext_disk/UAM_master/DL4AP/final_project/Few-shot-Bioacoustic-Event-Detection
   train_dir: /media/vic/ext_disk/UAM_master/DL4AP/final_project/Few-shot-Bioacoustic-Event-Detection/data/raw/development/Development_Set/Training_Set
 set:
@@ -49,11 +56,20 @@ set:
 train:
   device: cuda
   encoder: Resnet
-  epochs: 1
+  epochs: 5
   k_way: 5
   lr_rate: 0.001
+  log_metrics: true
   n_shot: 5
   num_classes: 15
   num_episodes: 2000
+  plot_metrics: true
   scheduler_gamma: 0.5
   scheduler_step_size: 10
+
+hydra:
+  run:
+    dir: ${path.output_dir}/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: ${path.output_dir}/hydra_multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}

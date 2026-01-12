@@ -1,145 +1,129 @@
-# Prototypical_Network
+# Few-shot Bioacoustic Event Detection (ProtoNet + ResNet)
 
-This is the deep learning baseline code for DCASE task 5. Prototypical networks were introduced by <a href="https://arxiv.org/abs/1703.05175">Snell et. al in 2017</a>. The core idea of the methodology is to learn an emebedding space where points cluster around a single prototype representation of each class. A non-linear mapping from the input space to embedding space is learnt using a convolutional neural network. Class prototype is calculated by taking a mean of its support set in the embedding space. Classification of a query point is conducted by finding the nearest class prototype.
+This repo contains a cleaned, reproducible pipeline for the DCASE Few-shot Bioacoustic Event Detection task. The system uses a prototypical network with a ResNet encoder, PCEN-based features, and episodic training. Evaluation supports adaptive segment length, negative sampling from gaps between the 5 shots, optional transductive refinement, and threshold sweeps.
 
-# Episodic training
+## Pipeline Overview
 
-Prototypical networks adopt an episodic training procedure where in each episode, a mini-batch is sampled from the dataset ensuring that each class has an equal representation, post which a subset of the mini batch is used as the support set to train the model and the remaining data is used as query set. The intention of episodic training is to replicate a few-shot learning task.
+1) **Features**: Mel spectrogram (128 bins) + PCEN, optionally concatenated with delta-MFCCs.  
+2) **Training**: episodic ProtoNet training using a ResNet encoder.  
+3) **Evaluation**: adaptive segment length per file, negative prototypes from gaps between the first 5 shots, and optional transductive refinement.  
+4) **Post-processing**: optional short-event filtering and gap merging.  
 
-The positive annotations in the training data are of unequal duration, hence we extract equal length patches from the annotated segments, where each patch inherits the label of its corresponding annotation. The training set is heavily imbalanced in terms of class distribution, hence we balance the dataset using oversampling. 
+## Quickstart
 
-# Evaluation
-
-In evaluation stage, each audio file is split in the same manner as done during training stage. Since there is only one class per audio file in the validation set, we adopt a binary classification strategy inspired from <a href="https://arxiv.org/abs/2008.02791">Wang el. al</a>. We use the 5 first positive (POS) annotations for calculation of positive class prototype and consider the entire audio file as negative class based on the assumption that the positive class is relatively sparse as compared to the entire track. 
-
-We randomly sample from the negative class to calculate the negative prototype. Each query sample is assigned a probability based on the distance from the positive and negative prototype. Onset and offset prediction is made based on thresholding the probabilities across the query set. Since samples are selected randomly for calculating the negative prototype, the prediction process for each file is repeated 5 times to negate some amount of randomness. The final prediction probability for each query frame is the average of predictions across all iterations. 
-
-# files
-
-1) `fsbio/features.py`: feature extraction + patching logic
-
-2) `fsbio/data.py`: dataset balancing and train/val splits
-
-3) `fsbio/sampler.py`: episodic batch sampler
-
-4) `fsbio/model.py`: prototypical net + resnet encoder
-
-5) `fsbio/metrics.py`: proto loss + evaluation routine
-
-6) `main.py`: hydra entrypoint that runs feature, train, eval stages
-
-7) `config.yaml`: all control params for feature extraction and training
-
-# Running the code
-
-We use <a href="https://hydra.cc/docs/intro/">hydra framework</a> for configuration management. To run the code:
-
-### Feature Extraction:
-
-1) We use config.yaml file to store the configuration parameters.
-2) To set the root directory and begin the feature extraction run the following command in terminal:
+### Feature extraction
 ```
-python main.py path.root_dir= root_dir set.features=true
-
-e.g. python main.py path.root_dir=/Bird_dev_train set.features=true
-```
-The training, evaluation, model and feature directories have been set relative to the root directory path. You can choose to set them based on your preference.
-
-### Training:
-
-Run the following command 
-
-```
-python main.py set.train=true
-```
-### Evaluation:
-
-For evaluation, either place the evaluation_metric code in the same folder as the rest of the code or include the path of the evaluation code in the eval section of the config file. Run the following command for evaluation:
-
-```
-python main.py set.eval=true
+python main.py set.features=true set.train=false set.eval=false
 ```
 
-
-### Important points:
-
-
-+ Per channel energy normalisation (PCEN) <a href="https://arxiv.org/abs/1607.05666">Wang el. al</a>. is conducted on mel frequency spectrogram and used as input
-  feature. Raw audio is scaled to the range [-2**31; 2**31-1 ] before mel transformation. PCEN is performed using librosa (default parameters).  
-+ Segment length refers to the equal length patches extracted from the time frequency representation. This is kept fixed for training set, however for evaluation
-  set, the segment legnths are selected based on the max length from 5 shots. This was done because the events are of varying lengths across different audio files 
-  and using a fixed length segments does not work well. 
-+ We use the 9 layer resnet encoder from the baseline and do not keep the 4 layer protonet option. 
-
-# Post Processing
-
-After predictions are produced, post processing is performed on the events. For each audio file,  There are two post processing methodologies - adaptive and fixed. In adaptive predicted events with shorter duration than 60% of the duration shortest shot provided for that file are removed. In fixed, any event less than 200 ms are removed. Code for adaptive post processing is in post_proc.py and code for fixed is in post_proc_new.py. The results on the DCASE page are from post_proc_new.py.
-Run the following command for post processing on a .csv file:
-
+### Training
 ```
-python post_proc_new.py -val_path=./Development_Set/Validation_Set/ -evaluation_file=eval_output.csv -new_evaluation_file=new_eval_output.csv
+python main.py set.features=false set.train=true set.eval=false
 ```
 
-## Config parameters
+### Evaluation (single threshold)
+```
+python main.py set.features=false set.train=false set.eval=true
+```
 
-The description was adapted from https://github.com/xdurch0/DCASE2021-Task5
+### Evaluation with sweep
+```
+python main.py set.features=false set.train=false set.eval=true \
+  eval.sweep=true eval.sweep_start=0.4 eval.sweep_stop=0.8 eval.sweep_step=0.05
+```
 
-### set
-| Parameter | What does it do |
-| ---- | ----- |
-| features | If true, extract features.
-| train | If true, train models.
-| eval | If true, evaluate trained models based on previously extracted probabilities.
+### Compute official metric
+```
+python evaluation_metrics/evaluation.py \
+  -pred_file=outputs/<run_folder>/eval_output.csv \
+  -ref_files_path=/path/to/Development_Set/Validation_Set/ \
+  -team_name=TESTteam \
+  -dataset=VAL \
+  -savepath=outputs/<run_folder>/
+```
 
-### path
-| Parameter | What does it do |
-| ---- | ----- |
-| root_dir | Convenience path to directory so that other paths can be relative.
-| train_dir | Path to the training data.
-| eval_dir | Path to the validation data.
-| feat_path | Directory where features will be extracted to (or are assumed to be found in).
-| feat_train | Directory with training features.
-| feat_eval | Directory with validation features.
-| model | Directory where trained models are stored.
-| best_model | Base name to use for best result of a single training run.
-| last_model | Base name to use for the final result of a single training run.
+## Outputs and Logging
 
+Each run creates a folder under `outputs/` with a descriptive name:
+```
+outputs/train_eval_sweep_td_s2_t1.0_w0.1_YYYYmmdd_HHMMSS/
+```
 
-### features
-| Parameter | What does it do |
-| ---- | ----- |
-| seg_len | Length of a data "segment", in seconds. 
-| hop_seg | Hop size between consecutive segments. 
-| eps | PCEN argument. In case of trainable PCEN, serves as the initial value.
-| fmax | Maximum frequency to use for time-frequency representation. 
-| fmin | Minimum frequency to use for time-frequency representation. 
-| sr | Sampling rate to use for the data. All data is resampled to this rate.
-| n_fft | Window size for STFT.
-| n_mels | Number of mel frequency bins to use.
-| hop_mel | Hop size for the STFT extraction.
-| train_limit | If > 0, cap the number of training csv files (useful for quick runs).
+Inside each run folder you will see:
+- `eval_output.csv` or `eval_output_thresh_*.csv`
+- `train_metrics.csv` and `train_curves.png` (if training)
+- `sweep_scores.json` / `sweep_scores.csv` (if sweep)
 
+Hydra logs are stored under:
+```
+outputs/hydra/YYYY-mm-dd/HH-MM-SS/
+```
 
-### train
-| Parameter | What does it do |
-| ---- | ----- |
-| n_shot | Size of support set per class per episode.
-| n_query | Size of query set per class per episode.
-| k_way | How many classes to use per episode. Classes are randomly chosen each iteration; remaining data is discarded. 
-| lr | Initial learning rate for `Adam`.
-| scheduler_gamma | Multiplication factor for learning rate decrease.
-| patience | How many epochs to wait with no validation improvement before reducing learning rate. 3 times this value is used for early stopping.
-| epochs | Maximum number of epochs to train.
-| num_episodes | Total number of episodes in one epoch. If none then calculate based on the length of training and validation set. 
-| encoder | The model to be used. Either classical Protonet or Resnet model. 
+## Scripts
 
+- `scripts/eval_sweep.py`: evaluate all sweep CSVs and generate a PR curve.
+- `scripts/tune_transductive.py`: grid search for transductive settings and save a report.
 
+Example sweep evaluation:
+```
+python scripts/eval_sweep.py \
+  --sweep_dir=outputs/<run_folder> \
+  --ref_files_path=/path/to/Development_Set/Validation_Set/ \
+  --team_name=TESTteam \
+  --dataset=VAL \
+  --plot_pr
+```
 
-### eval
-| Parameter | What does it do |
-| ---- | ----- |
-| samples_neg | How many samples to use for the negative prototype.
-| iterations | How many iterations to average the predictions over.
-| query_batch_size | The batch size for query set. 
-| negative_batch_size | Batch size for forming the negative prototype. 
-| threshold | Fixed threshold value.
+Example transductive grid search:
+```
+python scripts/tune_transductive.py \
+  --ref_files_path=/path/to/Development_Set/Validation_Set/ \
+  --outputs_dir=outputs \
+  --steps=1,2,3 \
+  --temps=1.0,2.0,3.0 \
+  --weights=0.05,0.1,0.2 \
+  --sweep_start=0.4 --sweep_stop=0.8 --sweep_step=0.05
+```
+
+## Configuration Notes
+
+Key config fields in `config.yaml`:
+
+- `features.use_delta_mfcc`, `features.n_mfcc`: add delta-MFCC features.
+- `eval.transductive*`: enable and tune transductive refinement.
+- `eval.sweep*`: enable threshold sweep and set the range.
+- `eval.postprocess`, `eval.min_duration_frac`, `eval.merge_gap_frac`: post-processing.
+- `eval.test_seglen_len_lim`, `eval.test_hoplen_fenmu`: adaptive eval segment length.
+- `path.output_dir`: base folder for run outputs.
+
+Only the **ResNet encoder** is supported in this cleaned version.
+
+## Repo Layout
+
+```
+fsbio/                feature extraction, model, sampler, metrics
+main.py               entrypoint (features/train/eval)
+config.yaml           configuration
+evaluation_metrics/   official DCASE evaluation
+scripts/              sweep + transductive tuning helpers
+outputs/              run outputs (created during execution)
+```
+
+## Requirements
+
+Install dependencies with:
+```
+pip install -r requirements.txt
+```
+
+## Post-processing (optional)
+
+Fixed post-processing based on removing events shorter than 200 ms:
+```
+python post_proc_new.py \
+  -val_path=/path/to/Development_Set/Validation_Set/ \
+  -evaluation_file=outputs/<run_folder>/eval_output.csv \
+  -new_evaluation_file=outputs/<run_folder>/eval_output_post.csv
+```
+
+Note: If `eval.postprocess=true` is enabled in config, avoid running `post_proc_new.py` to prevent double filtering.

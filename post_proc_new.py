@@ -1,9 +1,6 @@
-import csv
-from statistics import mean
-import numpy as np
-import os
 import argparse
-from sklearn.preprocessing import minmax_scale
+import csv
+import numpy as np
 
 
 def post_processing(val_path, evaluation_file, new_evaluation_file, n_shots=5):
