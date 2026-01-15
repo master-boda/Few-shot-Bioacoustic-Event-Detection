@@ -8,6 +8,8 @@
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
+\usepackage{float}
+\usepackage{array}
 \usepackage[section]{placeins}
 
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
@@ -28,101 +30,74 @@ T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 
 \begin{abstract}
 This report presents a lightweight few-shot bioacoustic event detection system
-for DCASE 2023 Task 5. I start from the official prototypical-network baseline
-and focus on feasible, evaluation-aware improvements without external data or
+for DCASE 2023 Task 5. I use the official prototypical-network baseline model
+and focus on feasible and valuable improvements without external data or
 heavy backbones. Audio is converted to PCEN features with delta-MFCCs, encoded
 by a shallow ResNet, and classified by distances to positive and negative
-prototypes. I use adaptive segmentation at evaluation, negative sampling from
-gaps between supports, optional transductive refinement of prototypes, and
-simple duration-based post-processing. On the validation set, the proposed
-configuration achieves 39.02\% F1 (precision 45.67\%, recall 34.06\%), improving
-the official prototypical baseline by 9.43 absolute F1. The study highlights
-which components most affect performance under the task’s strict 5-shot
-protocol and provides a reproducible reference for further experimentation.
+prototypes. This implementation uses adaptive segmentation at evaluation, negative sampling from
+gaps between supports, transductive refinement of prototypes, and post-processing
+rules. On the validation set, the proposed
+model achieves 39.02\% F1 (precision 45.67\%, recall 34.06\%), improving
+the official prototypical baseline by 9.43 absolute F1.
 \end{abstract}
 
 \begin{IEEEkeywords}
-few-shot learning, bioacoustics, sound event detection, embeddings, prototypical
-methods, event-based evaluation
+few-shot learning, bioacoustics, sound event detection.
 \end{IEEEkeywords}
 
 
 \section{Introduction}
-Few-Shot Learning (FSL) is a machine learning approach where a model is required
-to adapt to new, previously unseen categories using only a small number of
-labeled examples. This technique is especially valuable in scenarios where data
-collection or annotation is expensive or very time consuming. One application of
-this is Sound Event Detection (SED), which involves identifying the start and
-end points of specific sounds within an audio recording. In fields like
-bioacoustics, recordings often span long durations with only a few relevant
-sound events, making manual labeling especially challenging. FSL offers a
-solution by detecting these events using minimal annotated data. The DCASE
-Task~5 challenge exemplifies this problem under strict constraints: each file
-provides only five positive events as support, evaluation ignores everything
-before the fifth event, and each file must be treated independently
-\cite{dcasechallengeDCASE2023Task}. These rules make the task substantially
-harder than standard supervised SED and emphasize issues such as background
-noise, variable event durations, and domain mismatch across recording sources.
+Few-Shot Learning (FSL) is a ML approach that requires models to adapt to unseen classes using limited labeled examples. This is especially useful in cases where annotation is costly or time expensive. A common application is Sound Event Detection (SED), which identifies time boundaries of sounds in audio. In bioacoustics, recordings are frequently long with sparse positive events, making manual labeling difficult for which FSL proves to be useful by learning from minimal annotations.
 
-This project builds on the official DCASE 2023 prototypical network baseline as
-a reference point \cite{snellPrototypicalNetworksFewshot2017a} and experiments
-on how far it can be improved without heavy architectures or external data. The
-focus is therefore on feasible, secondary improvements such as feature
-representation, adaptive windowing, negative sampling strategy, transductive
-refinement, and post‑processing.
+The DCASE Task~5 challenge exemplifies this problem under several constraints: each file provides five support events, evaluation ignores all earlier content, and each file is processed independently \cite{dcasechallengeDCASE2023Task}. These rules emphasize obstacles like domain shifts, variable event durations, and noisy backgrounds.
 
-Although the 2024 edition expands the validation set and updates the official
-baseline, the 2023 edition uses the same development data and baseline
-definition used across the 2022--2023 technical reports. I therefore use the
-2023 edition to keep the reference baseline fixed and to attribute performance
-changes to the proposed modifications rather than to a shifted validation split
-or baseline update.
+This project builds on the official DCASE 2023 prototypical network baseline \cite{snellPrototypicalNetworksFewshot2017a}, aiming to improve it without external data or heavy modifications.
+Although the 2024 edition introduces updated baselines and validation data, I use the 2023 version to ensure consistency with prior reports and isolate the impact of my modifications.
 \section{State of the Art}
 Prototypical Networks introduced an important development approach to few-shot
 classification through metric learning, where the model is trained to map inputs
 into an embedding space. In this space, classification is done by measuring the
-distance to prototype representations of each class, resulting in effective
+distance to prototype representations of each class, resulting in
 generalization from just a few labeled examples
 \cite{snellPrototypicalNetworksFewshot2017a}. In 2022, most Task~5 systems stayed within
 this template, improving the encoder, segmentation strategy, and post‑processing
 \cite{liuSURREYSYSTEMDCASE2022,tangFEWSHOTEMBEDDINGLEARNING2022}. By 2023,
-the best results came from frame‑level fine‑tuning and auxiliary objectives
-(e.g., multi‑task branches) and from contrastive pretraining on the official
-data
+the best results came from frame‑level fine‑tuning,
+(e.g., multi‑task branches) and from contrastive pretraining
 \cite{yanMULTITASKFRAMELEVEL2023,moummadSUPERVISEDCONTRASTIVELEARNING2023}. In 2024, the
 trend continued toward stronger backbones and pretraining (e.g., U‑Net variants
 and AAPM‑style encoders), while prototypical methods were still strongly present
-in modified form through better negatives, attention mechanisms, or hybrid
+with important modifications like better negatives, attention mechanisms, or hybrid
 front‑ends \cite{dengWeiLiu1Hy2024}.
 
 \section{Description of the Proposed Method}
 
 \subsection{Overview}
-Following a lightweight prototypical‑network setup
-\cite{snellPrototypicalNetworksFewshot2017a}, audio is first converted into
-time–frequency representations, embedded via a shallow ResNet encoder, and
+Firstly, audio is first converted into
+time–frequency representations, embedded with a shallow ResNet encoder, and
 evaluated through distance to class prototypes. Support positives form the
-positive prototype, while negatives are sampled from silent regions between
+positive prototype, while negatives are sampled from regions between positive
 events \cite{tangFEWSHOTEMBEDDINGLEARNING2022}. Query embeddings are scored
-using softmax-based distances and converted to events via thresholding and
-refinement. Figure~\ref{fig:pipeline} summarizes the full pipeline.
+using softmax-based distances and converted to events. Figure~\ref{fig:pipeline}.
 
-\begin{figure}[t]
+\FloatBarrier
+\begin{figure}[H]
 \centering
-\includegraphics[width=\columnwidth]{figs/pipeline.pdf}
+\includegraphics[width=0.65\columnwidth]{figs/pipeline.pdf}
 \caption{Pipeline overview.}
 \label{fig:pipeline}
 \end{figure}
 
 \subsection{Feature Representation}
-I adopt a dual representation of PCEN and delta‑MFCCs to enhance robustness
+I use a dual representation of PCEN and delta‑MFCCs to improve robustness
 against channel and background variability. PCEN acts as a compressive, adaptive
 gain control \cite{wangTrainableFrontendRobust2016}, while delta‑MFCCs capture
-temporal dynamics \cite{hossanNovelApproachMFCC2011}. This combination yielded
+temporal dynamics \cite{hossanNovelApproachMFCC2011}. This combination provided
 strong validation performance in DCASE 2022 Task 5
-\cite{liuSURREYSYSTEMDCASE2022}. Figure~\ref{fig:feature_triplet} shows examples.
+\cite{liuSURREYSYSTEMDCASE2022}.
 
-\begin{figure}[t]
+\FloatBarrier
+\begin{figure}[H]
 \centering
 \includegraphics[width=\columnwidth]{figs/fig_features_triplet.pdf}
 \caption{Example input representations: log‑mel, PCEN, and delta‑MFCC.}
@@ -131,24 +106,24 @@ strong validation performance in DCASE 2022 Task 5
 
 \subsection{Segmentation}
 I use fixed‑length patches during training (0.2\,s with 0.1\,s hop) so that all
-episodes share a consistent input shape; this stabilizes episodic training and keeps
-the embedding geometry fixed. At evaluation time, I adapt the segment length per file
-based on the \emph{maximum} duration among the five support events, using a tiered rule
-that shortens very long events while keeping enough temporal context. This mirrors the
+episodes share a consistent input shape, this stabilizes episodic training. 
+At evaluation time, I adapt the segment length per file
+based on the \emph{maximum} duration among the five support events, using a rule
+that shortens very long events while keeping enough temporal context. This follows the
 Task~5 adaptive segmentation practice where evaluation windows track support duration
-to avoid missing short calls or smearing long ones \cite{tangFEWSHOTEMBEDDINGLEARNING2022}.
+to avoid missing short calls or spreading long ones \cite{tangFEWSHOTEMBEDDINGLEARNING2022}.
+
 \begin{equation}
 \begin{aligned}
-L_{\text{raw}} &=
+L &=
 \begin{cases}
-8, & \ell < 8 \\
-\ell, & 8 \le \ell < L_{\text{lim}} \\
+L_{\text{train}}, & \ell < L_{\text{train}} \\
+\ell, & L_{\text{train}} \le \ell < L_{\text{lim}} \\
 \lfloor \ell/2 \rfloor, & L_{\text{lim}} \le \ell \le 2L_{\text{lim}} \\
 \lfloor \ell/4 \rfloor, & 2L_{\text{lim}} < \ell < 500 \\
 \lfloor \ell/8 \rfloor, & \ell \ge 500
 \end{cases} \\
-L &= \max(L_{\text{raw}}, L_{\text{train}}), \qquad
-H = \max\!\big(1, \operatorname{round}(L/d)\big)
+H &= \max\!\big(1, \operatorname{round}(L/d)\big)
 \end{aligned}
 \label{eq:segmentation}
 \end{equation}
@@ -169,15 +144,17 @@ optimization stability \cite{heDeepResidualLearning2016}. The residual block
 structure is shown in Figure~\ref{fig:residual_block}, and the overall encoder
 stages are summarized in Table~\ref{tab:resnet_stages}.
 
-\begin{figure}[t]
+\FloatBarrier
+\begin{figure}[H]
 \centering
 \includegraphics[width=0.85\columnwidth]{figs/residual_block.pdf}
 \caption{Residual block used in the ResNet encoder.}
 \label{fig:residual_block}
 \end{figure}
 
-\begin{table}[t]
-\caption{Encoder layer overview. Each residual block contains three 3$\times$3 convolutions.}
+\FloatBarrier
+\begin{table}[H]
+\caption{Encoder overview.}
 \label{tab:resnet_stages}
 \centering
 \begin{tabular}{lcc}
@@ -193,7 +170,7 @@ AdaptiveAvgPooling & -- & 4$\times$2 \\
 \end{table}
 
 \subsection{Training Method}
-I train the encoder with episodic tasks, following the prototypical‑network
+I train the encoder with episodic tasks, following the prototypical network
 setup \cite{snellPrototypicalNetworksFewshot2017a}. Each episode samples
 $C$ classes and draws $K$ support examples per class. The remaining 
 examples from those classes form the query set.
@@ -211,12 +188,13 @@ P(y=k \mid \mathbf{z}) =
 \label{eq:proto_softmax}
 \end{equation}
 The episode loss is the average negative log‑likelihood of the correct class
-across all query examples. I reuse the same scoring rule at evaluation, where
-the positive and negative prototypes are computed from support and gap
+of all query examples. I reuse the same scoring rule at evaluation, where
+the positive and negative prototypes are calculated from support and gap
 segments, respectively. Figure~\ref{fig:episodic_training} illustrates the
-episode structure used for training.
+episodic method used for training.
 
-\begin{figure}[t]
+\FloatBarrier
+\begin{figure}[H]
 \centering
 \makebox[\columnwidth][c]{\includegraphics[width=1.3\columnwidth]{figs/episodic_training.pdf}}
 \caption{Episodic training schematic (C‑way (5), K‑shot (2)).}
@@ -234,7 +212,7 @@ w_{i,-} &= 1 - w_{i,+}
 \end{aligned}
 \label{eq:trans_assign}
 \end{equation}
-The query‑weighted updates are then computed and blended with the current prototypes:
+The query weighted updates are then computed and impact the current prototypes:
 \begin{equation}
 \begin{aligned}
 \tilde{\mathbf{p}}_{+} &= \frac{\sum_i w_{i,+}\mathbf{z}_i}{\sum_i w_{i,+}}, \quad
@@ -243,17 +221,17 @@ The query‑weighted updates are then computed and blended with the current prot
 \end{aligned}
 \label{eq:trans_update}
 \end{equation}
-where $\tau$ controls the sharpness of the assignments and $\lambda$ is the query‑weight.
-This update is repeated for a fixed number of iterations and corresponds to a transductive
-inference stage that adapts the prototypes to the test file without labels
-\cite{boudiafFewShotSegmentationMetaLearning2021}. Earlier versions of my implementation
-showed large file‑to‑file variance, so this refinement provides a more stable way to
-fit the prototypes to each specific recording.
+where $\tau$ controls the confidence of the assignments and $\lambda$ is the query weight.
+This update is repeated for a fixed number of iterations and 
+adapts the prototypes to the test file without labels \cite{boudiafFewShotSegmentationMetaLearning2021}. 
+Earlier versions of my implementation
+showed large file-to-file variance, due to difficulty adapting the prototypes to each specific recording.
+In respect to this, this step was fundamental.
 
 \subsection{Post‑Processing Logic}
 Event predictions are refined using heuristic filtering. Short events are
-removed, and close detections are merged to avoid duplicated detections.
-Thresholds for duration and gap filtering are derived from the average
+removed, and close detections are merged to avoid double detections.
+Thresholds for duration and gap filtering are obtained based on the average
 positive event duration
 \cite{hertkornFEWSHOTBIOACOUSTICEVENT2022}:
 \begin{equation}
@@ -267,18 +245,20 @@ positive event duration
 \section{Experimental Setup}
 
 \subsection{Dataset overview}
-Experiments use the DCASE 2023 Task~5 development set
-\cite{dcasechallengeDCASE2023Task}. The Training\_Set aggregates five sources
-(BV, HT, JD, MT, WMW) with multi‑class annotations; the official totals are 174
-recordings, 21\,h, 47 classes, and 14\,229 positive events. The Validation\_Set
-in the dev package used here contains three subsets (HB, PB, ME) totaling 18
-recordings and 1\,034 positive events. Sampling rates range from 6\,kHz to
-48\,kHz, and there is no class overlap between training and validation.
+To develop this project, I used the DCASE 2023 Task5 development set
+\cite{dcasechallengeDCASE2023Task}. The Training Set contains five subsets
+(BV, HT, JD, MT, WMW) with event annotations, consisting of 174 recordings,
+21,h, 47 classes, and 14,229 positive events. Event ratio varies between
+0.04--0.24, and sampling rates vary between 6--48,kHz. The Validation Set
+contains three subsets (HB, PB, ME) with 18 recordings and 1,034 positive
+events, and event ratio of 0.01--0.7, as well as sampling
+rates 44.1--48,kHz. There is no class overlap between training and validation.
 Table~\ref{tab:train_overview} and Table~\ref{tab:val_overview} summarize these
 splits.
 
-\begin{table}[t]
-\caption{Training set overview (official statistics).}
+\FloatBarrier
+\begin{table}[H]
+\caption{Training set overview.}
 \label{tab:train_overview}
 \centering
 \begin{tabular}{lcccc}
@@ -296,8 +276,9 @@ WMW & 161 & 4\,h\,40\,m  & 26 & 2\,941 \\
 \end{tabular}
 \end{table}
 
-\begin{table}[t]
-\caption{Validation set overview (local dev package).}
+\FloatBarrier
+\begin{table}[H]
+\caption{Validation set overview.}
 \label{tab:val_overview}
 \centering
 \begin{tabular}{lcccc}
@@ -322,7 +303,7 @@ Unknown (UNK) segments are excluded.
 Audio is resampled to 22.05\,kHz. 128-bin mel spectrograms are computed with
 $n\_fft=512$ and hop=256. PCEN is applied, and 40-dimensional delta‑MFCCs are
 concatenated, following Task~5 settings shown to work well in other similar systems
-\cite{wangTrainableFrontendRobust2016,hossanNovelApproachMFCC2011,liuSURREYSYSTEMDCASE2022}. This results
+\cite{wangTrainableFrontendRobust2016,hossanNovelApproachMFCC2011,liuSURREYSYSTEMDCASE2022}. This results in
 168 features per frame, so each segment is shaped $(T,F)=(17,168)$ and batched as
 $(B,17,168)$ before entering the encoder.
 
@@ -333,7 +314,7 @@ StepLR scheduler (step size 10, gamma 0.5). Validation accuracy selects the best
 checkpoint.
 
 \subsection{Evaluation Configuration}
-At test time, segment length is adapted per file using
+During evaluation, segment length is adapted per file using
 Eq.~\eqref{eq:segmentation} with $L_{\text{lim}}=20$ frames, hop divisor $d=2$, and
 $L_{\text{train}}=17$ as a lower bound. Negative prototypes are averaged from 30
 samples over 6 iterations. Transductive refinement follows
@@ -346,22 +327,27 @@ Performance is measured with the official macro-averaged F-measure using
 event-based IoU and bipartite matching. Support regions are excluded \cite{DcasefewshotbioacousticEvaluation_metricsMain}.
 
 \section{Experiments and Results}
-I evaluated the baseline configuration and then ran targeted sweeps across key
-inference settings: post‑processing parameters (minimum duration and merge gap
+In order to optimize the configuration, I ran several grid searches across
+different parameters to attempt improvements.
+These include post‑processing parameters (minimum duration and merge gap
 fractions), negative sampling (samples per iteration and iteration count), hop
-divisor, and segment‑length limits. These experiments were used to confirm
-stability and select a threshold that maximizes validation F1. A separate sweep
-over training hyperparameters (learning rate and epochs) did not exceed the
-best validation F1 obtained with the default training configuration.
+divisor, segment‑length limit, transductive refinement parameters
+($\tau$, $\lambda$, steps), and threshold sweep. For which the optimal
+values found were stated in the previous section.
 
-Table~\ref{tab:trans_refine} illustrates how refinement nudges the positive and
-negative prototypes toward the query distribution, while maintaining a high
-angular similarity between them. This supports the qualitative role of
-transductive refinement as a stabilizer in dense or noisy files.
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\columnwidth]{figs/f1_vs_threshold.pdf}
+\caption{Validation F1 as a function of threshold. The best F1 occurs at 0.6.}
+\label{fig:f1_thresh}
+\end{figure}
 
-\begin{table}[t]
-\caption{Example of transductive refinement on ME1. Prototype changes are reported
-per step ($\tau=1.0$, $\lambda=0.1$).}
+Transductive refinement modifies the positive and negative prototypes toward the
+query distribution, while keeping a high cosine similarity between them.
+An example on ME1 is reported in Table~\ref{tab:trans_refine}.
+\begin{table}[!ht]
+\caption{Example of transductive refinement on ME1 (changes
+per step ($\tau=1.0$, $\lambda=0.1$)).}
 \label{tab:trans_refine}
 \centering
 \begin{tabular}{lccccc}
@@ -374,47 +360,46 @@ Init & 0.000 & 0.000 & 7.597 & 8.016 & 0.966 \\
 \hline
 \end{tabular}
 \end{table}
+\FloatBarrier
 
-Table~\ref{tab:results} reports validation performance against the two official
-baselines and the 2023 winning system. The system reaches an F1 of 39.02\% with
-precision 45.67\% and recall 34.06\%. This is a +9.43 absolute F1 improvement
-over the official prototypical baseline and far above the template‑matching
-baseline, though it remains below state‑of‑the‑art results. The threshold sweep
-(Figure~\ref{fig:f1_thresh}) shows a clear optimum at 0.6, which is the value
-used in all reported experiments.
+Validation performance against the two official baselines and the 2023 winning
+system shows that post‑processing and transductive refinement both contribute to
+the final score (Table~\ref{tab:results}). Their combined use reults in the best performance,
+reaching an F1 of 39.02\%
+with precision 45.67\% and recall 34.06\%. This is a +9.43 absolute F1
+improvement over the official prototypical baseline and far above the
+template‑matching baseline, though it remains below state‑of‑the‑art results.
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figs/f1_vs_threshold.pdf}
-\caption{Validation F1 as a function of threshold. The best F1 occurs at 0.6.}
-\label{fig:f1_thresh}
-\end{figure}
+Per class precision, recall, and F1 are reported in
+Table~\ref{tab:subset_results}. Performance varies by file: ME and HB recordings
+tend to be detected more reliably, while PB files with very short events and dense
+activity resulted lower recall. This is somewhat to be expected due to the known sensitivity of
+segment‑level methods to event duration and annotation density \cite{hertkornFEWSHOTBIOACOUSTICEVENT2022,tangFEWSHOTEMBEDDINGLEARNING2022,liuSURREYSYSTEMDCASE2022}.
 
-\begin{table}[t]
-\caption{Validation performance compared to official baselines and the 2023 winning system.}
+\begin{table}[!ht]
+\caption{Validation performance compared to official baselines and the 2023 winner.}
 \label{tab:results}
 \centering
-\begin{tabular}{lccc}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabular}{p{4.3cm}ccc}
 \hline
 \textbf{Method} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
 \hline
 Template Matching (baseline) & 2.42 & 18.32 & 4.28 \\
 Prototypical Network (baseline) & 36.34 & 24.96 & 29.59 \\
 Du et al. (2023 winner) \cite{yanMULTITASKFRAMELEVEL2023} & 76.20 & 75.30 & 75.70 \\
-\textbf{Proposed system} & \textbf{45.67} & \textbf{34.06} & \textbf{39.02} \\
+\hline
+NO post-processing + NO transductive refinement & 41.97 & 28.68 & 34.08 \\
+Post-processing only & 45.31 & 28.28 & 34.82 \\
+Transductive refinement only & 42.74 & 34.33 & 38.08 \\
+\textbf{Proposed model} & \textbf{45.67} & \textbf{34.06} & \textbf{39.02} \\
 \hline
 \end{tabular}
 \end{table}
 
-Subset‑level precision, recall, and F1 are reported in
-Table~\ref{tab:subset_results}. Performance varies by file
-(Table~\ref{tab:per_file}): ME and HB recordings tend to be detected reliably,
-while PB files with very short events and dense activity show lower recall. This
-aligns with the known sensitivity of segment‑level methods to event duration and
-annotation density.
 
-\begin{table}[t]
-\caption{Per-subset performance for the proposed system.}
+\begin{table}[!ht]
+\caption{Validation Per-subset performance.}
 \label{tab:subset_results}
 \centering
 \begin{tabular}{lccc}
@@ -424,30 +409,26 @@ annotation density.
 HB & 64.86 & 54.08 & 58.98 \\
 ME & 43.12 & 90.38 & 58.39 \\
 PB & 36.94 & 25.79 & 30.37 \\
-Overall & 45.67 & 34.06 & 39.02 \\
+\textbf{Overall} & \textbf{45.67} & \textbf{34.06} & \textbf{39.02} \\
 \hline
 \end{tabular}
 \end{table}
 
 \section{Discussion and Conclusion}
-The experiments show that a careful, evaluation‑aware tuning of a lightweight
-prototypical pipeline yields clear gains over the official baseline without
-external data or heavy backbones. The largest sensitivity comes from post‑processing
-threshold choice and minimum‑duration filtering, consistent with the event‑based
-metric and the strong class‑imbalance in several files. The gap between subsets
-highlights the limitations of segment‑level matching on short, dense events (PB),
-where a frame‑level model or stronger temporal modeling would likely help.
-Transductive refinement stabilizes file‑to‑file variance, but its impact remains
-bounded by the quality of the encoder and the negative sampling strategy.
+The experiments show that the official prototypical baseline can be significantly improved
+with the inclusion of several lightweight modifications and finetuning. 
+The largest sensitivity comes from post‑processing
+threshold choice and minimum‑duration filtering. The gap between subsets
+are an example of the limitations of segment‑level matching on short, dense events (PB),
+where a frame‑level model or stronger temporal modeling would probably help.
+Transductive refinement stabilizes file‑to‑file variance, but is limited
+by the quality of the encoder and the negative sampling strategy \cite{boudiafFewShotSegmentationMetaLearning2021,tangFEWSHOTEMBEDDINGLEARNING2022}.
 
-In conclusion, I implemented a reproducible few‑shot event detection pipeline that
+In conclusion, I implemented a few‑shot bioacoustic event detection pipeline that
 improves the DCASE 2023 prototypical baseline by 9.43 F1 points on the validation
-set. The work clarifies which adjustments are most effective under the task rules:
-input representation, adaptive segmentation, robust negative sampling, and
-post‑processing. Future work should focus on frame‑level scoring, stronger
-self‑supervised pretraining within allowed data, and per‑file adaptive thresholds
-to further close the gap with state‑of‑the‑art systems.
-
+set. This implementation could be further improved through many ways, such as 
+frame‑level processing, self‑supervised pretraining with allowed data, more complex embedding
+backbones, or multi‑task learning.
 \bibliographystyle{IEEEtran}
 \bibliography{references}
 
