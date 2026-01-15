@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import re
+import random
 import sys
 from datetime import datetime
 from glob import glob
@@ -10,7 +11,7 @@ import h5py
 import hydra
 import numpy as np
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from fsbio.data import DataBuilder
@@ -22,9 +23,13 @@ from fsbio.sampler import EpisodicBatchSampler
 
 # simple seeding helper
 
-def init_seed():
-    torch.manual_seed(0)
-    torch.cuda.manual_seed(0)
+def init_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 # training loop for episodic proto
@@ -97,6 +102,26 @@ def _get_run_dir(conf):
     run_dir = os.path.join(base_dir, f"{label}_{stamp}")
     os.makedirs(run_dir, exist_ok=True)
     return run_dir
+
+
+def _resolve_model_paths(conf):
+    model_tag = conf.path.get("model_tag")
+    if not model_tag:
+        return
+    model_tag = str(model_tag)
+    base_model_dir = conf.path.Model
+    model_dir = os.path.join(base_model_dir, model_tag)
+    conf.path.Model = model_dir
+    conf.path.best_model = os.path.join(model_dir, "best_model.pth")
+    conf.path.last_model = os.path.join(model_dir, "last_model.pth")
+
+
+def _write_config_snapshot(conf, run_dir: str):
+    if run_dir is None:
+        return
+    snapshot_path = os.path.join(run_dir, "config_snapshot.yaml")
+    with open(snapshot_path, "w") as handle:
+        handle.write(OmegaConf.to_yaml(conf, resolve=True))
 
 
 def _maybe_evaluate_predictions(conf, pred_file, run_dir):
@@ -219,6 +244,8 @@ def main(conf: DictConfig):
     run_dir = None
     if conf.set.train or conf.set.eval:
         run_dir = _get_run_dir(conf)
+    _resolve_model_paths(conf)
+    _write_config_snapshot(conf, run_dir)
 
     if conf.set.features:
         print(" --Feature Extraction Stage--")
@@ -237,7 +264,8 @@ def main(conf: DictConfig):
             raise FileNotFoundError(
                 f"training features not found at {hdf_path}. Run feature extraction or set set.features=true."
             )
-        init_seed()
+        seed = int(conf.train.get("seed", 0))
+        init_seed(seed)
 
         gen_train = DataBuilder(conf)
         x_train, y_train, x_val, y_val = gen_train.generate_train()
@@ -295,7 +323,8 @@ def main(conf: DictConfig):
         device = conf.train.device
         if device == 'cuda' and not torch.cuda.is_available():
             device = 'cpu'
-        init_seed()
+        seed = int(conf.eval.get("seed", conf.train.get("seed", 0)))
+        init_seed(seed)
 
         name_arr = np.array([])
         onset_arr = np.array([])

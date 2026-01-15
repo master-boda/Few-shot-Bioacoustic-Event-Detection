@@ -53,6 +53,7 @@ Inside each run folder you will see:
 - `eval_output.csv` or `eval_output_thresh_*.csv`
 - `train_metrics.csv` and `train_curves.png` (if training)
 - `sweep_scores.json` / `sweep_scores.csv` (if sweep)
+- `config_snapshot.yaml` (resolved config for the run)
 
 Hydra logs are stored under:
 ```
@@ -63,6 +64,11 @@ outputs/hydra/YYYY-mm-dd/HH-MM-SS/
 
 - `scripts/eval_sweep.py`: evaluate all sweep CSVs and generate a PR curve.
 - `scripts/tune_transductive.py`: grid search for transductive settings and save a report.
+- `scripts/tune_postprocess.py`: grid search for post-processing thresholds and save a report.
+- `scripts/tune_eval_stability.py`: grid search for eval samples/iterations with fixed threshold.
+- `scripts/tune_hoplen.py`: grid search for eval hop length factor with fixed threshold.
+- `scripts/tune_seglen_lim.py`: grid search for eval segment-length limit with fixed threshold.
+- `scripts/tune_train.py`: grid search for training tweaks (lr/epochs) and evaluate each model.
 
 Example sweep evaluation:
 ```
@@ -85,6 +91,59 @@ python scripts/tune_transductive.py \
   --sweep_start=0.4 --sweep_stop=0.8 --sweep_step=0.05
 ```
 
+Example post-processing grid search:
+```bash
+python scripts/tune_postprocess.py \
+  --ref_files_path=/path/to/Development_Set/Validation_Set/ \
+  --outputs_dir=outputs \
+  --min_fracs=0.05,0.1,0.15,0.2 \
+  --merge_fracs=0.05,0.1,0.15,0.2 \
+  --sweep_start=0.4 --sweep_stop=0.8 --sweep_step=0.05
+```
+
+Example eval stability grid search (fixed threshold):
+```bash
+python scripts/tune_eval_stability.py \
+  --ref_files_path=/path/to/Development_Set/Validation_Set/ \
+  --outputs_dir=outputs \
+  --samples_neg=30,50,100 \
+  --iterations=3,6,10 \
+  --threshold=0.6
+```
+
+Example hop length factor grid search:
+```bash
+python scripts/tune_hoplen.py \
+  --ref_files_path=/path/to/Development_Set/Validation_Set/ \
+  --outputs_dir=outputs \
+  --hop_factors=2,3,4 \
+  --samples_neg=30 \
+  --iterations=6 \
+  --threshold=0.6
+```
+
+Example segment-length limit grid search:
+```bash
+python scripts/tune_seglen_lim.py \
+  --ref_files_path=/path/to/Development_Set/Validation_Set/ \
+  --outputs_dir=outputs \
+  --seglen_lims=20,30,40 \
+  --hop_factor=2 \
+  --samples_neg=30 \
+  --iterations=6 \
+  --threshold=0.6
+```
+
+Example training grid search (lr/epochs):
+```bash
+python scripts/tune_train.py \
+  --ref_files_path=/path/to/Development_Set/Validation_Set/ \
+  --outputs_dir=outputs \
+  --lrs=0.001,0.0005,0.0001 \
+  --epochs=5,10 \
+  --threshold=0.6
+```
+
 ## Configuration Notes
 
 Key config fields in `config.yaml`:
@@ -95,6 +154,8 @@ Key config fields in `config.yaml`:
 - `eval.postprocess`, `eval.min_duration_frac`, `eval.merge_gap_frac`: post-processing.
 - `eval.test_seglen_len_lim`, `eval.test_hoplen_fenmu`: adaptive eval segment length.
 - `path.output_dir`: base folder for run outputs.
+- `path.model_tag`: optional subfolder under `path.Model` for versioned checkpoints.
+- `train.seed`, `eval.seed`: random seeds for reproducibility.
 
 Only the **ResNet encoder** is supported in this cleaned version.
 

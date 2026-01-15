@@ -1,9 +1,10 @@
 eval:
-  compute_metrics: false
+  compute_metrics: true
+  seed: 0
   iterations: 6
-  merge_gap_frac: 0.15
+  merge_gap_frac: 0.05
   negative_set_batch_size: 8
-  min_duration_frac: 0.1
+  min_duration_frac: 0.2
   postprocess: true
   query_batch_size: 4
   samples_neg: 30
@@ -17,8 +18,8 @@ eval:
   sweep_stop: 0.9
   sweep_step: 0.05
   sweep_thresholds: null
-  test_hoplen_fenmu: 3
-  test_seglen_len_lim: 30
+  test_hoplen_fenmu: 2
+  test_seglen_len_lim: 20
   threshold: 0.6
   metrics_team: TESTteam
   metrics_dataset: VAL
@@ -46,6 +47,7 @@ path:
   feat_path: ${path.root_dir}/Features
   feat_train: ${path.feat_path}/feat_train
   last_model: ${path.Model}/last_model.pth
+  model_tag: null
   output_dir: ${path.root_dir}/outputs
   root_dir: /media/vic/ext_disk/UAM_master/DL4AP/final_project/Few-shot-Bioacoustic-Event-Detection
   train_dir: /media/vic/ext_disk/UAM_master/DL4AP/final_project/Few-shot-Bioacoustic-Event-Detection/data/raw/development/Development_Set/Training_Set
@@ -56,7 +58,7 @@ set:
 train:
   device: cuda
   encoder: Resnet
-  epochs: 5
+  epochs: 10
   k_way: 5
   lr_rate: 0.001
   log_metrics: true
@@ -66,6 +68,7 @@ train:
   plot_metrics: true
   scheduler_gamma: 0.5
   scheduler_step_size: 10
+  seed: 0
 
 hydra:
   run:

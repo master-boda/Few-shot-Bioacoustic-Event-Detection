@@ -97,6 +97,88 @@ better negatives, attention mechanisms, or hybrid front‑ends \cite{dengWeiLiu1
 
 \subsection{Overview}
 Following a lightweight prototypical‑network setup \cite{snellPrototypicalNetworksFewshot2017a}, 
+audio is first converted into time–frequency representations, embedded via a shallow ResNet encoder, and evaluated through distance to class prototypes. Support positives form the positive prototype, while negatives are sampled from silent regions between events \cite{tangFEWSHOTEMBEDDINGLEARNING2022}. Query embeddings are scored using softmax-based distances and converted to events via thresholding and refinement.
+
+\subsection{Feature Representation}
+We adopt a dual representation of PCEN and delta‑MFCCs to enhance robustness against channel and background variability. PCEN acts as a compressive, adaptive gain control \cite{wangTrainableFrontendRobust2016}, while delta‑MFCCs capture temporal dynamics \cite{hossanNovelApproachMFCC2011}. This combination yielded strong validation performance in DCASE 2022 Task 5 \cite{liuSURREYSYSTEMDCASE2022}.
+
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\columnwidth]{figs/fig_features_triplet.pdf}
+\caption{Example input representations: log‑mel, PCEN, and delta‑MFCC.}
+\label{fig:feature_triplet}
+\end{figure}
+
+\subsection{Segmentation Strategy}
+Training uses fixed-length segments, while inference adapts the segment length per file to improve alignment with variable event durations \cite{tangFEWSHOTEMBEDDINGLEARNING2022}. We compute the mean duration of the five positive supports and derive both segment length and hop size from this.
+
+\begin{equation}
+\begin{aligned}
+\bar{t} &= \frac{1}{K}\sum_{i=1}^{K} (t^{\text{end}}_i - t^{\text{start}}_i) \\
+L &= \min\big(L_{\max}, \lfloor \bar{t} \cdot f_s \rfloor\big), \quad
+H = \lfloor L / 2 \rfloor
+\end{aligned}
+\end{equation}
+
+\subsection{Encoder Architecture}
+The encoder is a shallow ResNet using three residual blocks with progressively increasing channel sizes. Residual connections enable deeper representation without overfitting.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\columnwidth]{figs/residual_block.pdf}
+\caption{Residual block used in the ResNet encoder.}
+\label{fig:residual_block}
+\end{figure}
+
+\begin{table}[t]
+\caption{Encoder layer overview. Each residual block contains three 3$\times$3 convolutions.}
+\label{tab:resnet_stages}
+\centering
+\begin{tabular}{lcc}
+\hline
+\textbf{Layers} & \textbf{Channels} & \textbf{Kernel size} \\
+\hline
+ResidualBlock & 64 & 3$\times$3 \\
+ResidualBlock & 128 & 3$\times$3 \\
+ResidualBlock & 64 & 3$\times$3 \\
+AdaptiveAvgPooling & -- & 4$\times$2 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Training Paradigm}
+We adopt episodic training under a 5-way, 5-shot few-shot setup. Each training episode samples supports and queries from five classes, optimizing the encoder using a prototypical objective.
+
+\begin{figure}[t]
+\centering
+\makebox[\columnwidth][c]{\includegraphics[width=1.3\columnwidth]{figs/episodic_training.pdf}}
+\caption{Episodic training schematic (C‑way (5), K‑shot (2)).}
+\label{fig:episodic_training}
+\end{figure}
+
+\subsection{Prototype Scoring and Transductive Refinement}
+We compute positive and negative prototypes as class centroids in embedding space:
+\begin{equation}
+\mathbf{p}_{+}=\frac{1}{K}\sum_{i=1}^{K} f_\theta(\mathbf{x}^{+}_i), \quad
+\mathbf{p}_{-}=\frac{1}{M}\sum_{j=1}^{M} f_\theta(\mathbf{x}^{-}_j)
+\end{equation}
+The classification is done via:
+\begin{equation}
+P(y=+ \mid \mathbf{z}) =
+\mathrm{softmax}\big(-d(\mathbf{z},\mathbf{p}_{+}),\,-d(\mathbf{z},\mathbf{p}_{-})\big)_+
+\end{equation}
+A transductive step optionally adjusts prototypes using query statistics \cite{boudiafFewShotSegmentationMetaLearning2021}.
+
+\subsection{Post‑Processing Logic}
+Event predictions are refined using heuristic filtering. Short events are removed, and closely spaced detections are merged. Thresholds for duration and gap filtering are derived from the average support duration \cite{hertkornFEWSHOTBIOACOUSTICEVENT2022}:
+\begin{equation}
+\begin{aligned}
+\text{keep event} &:\ (t^{\text{end}}-t^{\text{start}}) \ge \alpha\,\bar{t} \\
+\text{merge if} &:\ (t^{\text{start}}_{i+1}-t^{\text{end}}_{i}) \le \beta\,\bar{t}
+\end{aligned}
+\end{equation}
+\subsection{Overview}
+Following a lightweight prototypical‑network setup \cite{snellPrototypicalNetworksFewshot2017a}, 
 audio is converted to PCEN features with delta‑MFCCs \cite{wangTrainableFrontendRobust2016,hossanNovelApproachMFCC2011} 
 and embedded by a shallow ResNet encoder \cite{heDeepResidualLearning2016}. The five positives 
 define a positive prototype, while negatives are taken from the gaps between positives as 
@@ -236,40 +318,26 @@ ME & 2  & 20\,m       & 2 & 62 \\
 \end{tabular}
 \end{table}
 
-\subsection{Protocol and annotations}
-Validation follows the 5‑shot protocol: only the first five POS events per file
-are used as support, and all time before the end of the fifth event is ignored
-in evaluation. Each file is treated independently. UNK segments are excluded
-from metric computation.
+\subsection{Protocol and Annotations}
+Validation uses a 5-shot protocol. Only the first five positive events in each file are used as support. Evaluation ignores data before the fifth event ends. Unknown (UNK) segments are excluded.
 
-\subsection{Feature extraction}
-All audio is resampled to 22.05\,kHz. I compute 128‑bin mel spectrograms with
-$n\_fft=512$ and hop=256, apply PCEN, and concatenate delta‑MFCC features
-($n\_{mfcc}=40$). Training segments are 0.2\,s with 0.1\,s hop.
+\subsection{Feature Extraction}
+Audio is resampled to 22.05\,kHz. 128-bin mel spectrograms are computed with $n\_fft=512$ and hop=256. PCEN is applied, and 40-dimensional delta‑MFCCs are concatenated.
 
-\subsection{Model training}
-The encoder is a shallow ResNet with time‑only pooling. I train episodically
-with 5‑way, 5‑shot batches and 2000 episodes per epoch for 15 epochs. The
-optimizer is Adam with $\mathrm{lr}=10^{-3}$ and a StepLR schedule
-(step size 10, gamma 0.5). The best checkpoint is selected by validation
-accuracy.
+\subsection{Model Training}
+Training segments are 0.2\,s with 0.1\,s hop. The encoder is trained for 15 epochs with 2000 episodes per epoch using Adam ($\mathrm{lr}=10^{-3}$) and a StepLR scheduler (step size 10, gamma 0.5). Validation accuracy selects the best checkpoint.
 
-\subsection{Evaluation configuration}
-At evaluation, segment length is adapted per file using the maximum positive
-duration (in frames) with a cap of 20 frames; the hop is set to half the segment
-length. Negative prototypes are built from gap segments between positives. We
-sample 30 negatives and average over 6 iterations. Transductive refinement uses
-2 steps (temperature 1.0, query weight 0.1). Post‑processing applies a fixed
-threshold of 0.6, removes events shorter than 0.2 of the average positive length,
-and merges gaps shorter than 0.05 of that length.
+\subsection{Evaluation Configuration}
+At test time, segment length is adapted per file using the maximum support event duration (capped at 20 frames); hop is set to half the segment length. Negative prototypes are averaged from 30 samples over 6 iterations. Transductive refinement uses 2 steps (temperature 1.0, weight 0.1). Post‑processing applies:
+- Threshold = 0.6
+- Minimum duration = $0.2 \times \bar{t}$
+- Merge gap = $0.05 \times \bar{t}$
 
-\subsection{Evaluation metric}
-I use the official event‑based, macro‑averaged F‑measure with IoU and bipartite
-matching. The metric ignores the support region (up to the fifth POS event).
+\subsection{Evaluation Metric}
+Performance is measured with the official macro-averaged F-measure using event-based IoU and bipartite matching. Support regions are excluded.
 
 \subsection{Reproducibility}
-All runs fix the train and eval random seeds to 0. Each run writes a
-`config\_snapshot.yaml` to its output folder to preserve the exact settings.
+Training and
 
 \section{Results}
 Results will be reported using the official event-based F-measure, alongside
